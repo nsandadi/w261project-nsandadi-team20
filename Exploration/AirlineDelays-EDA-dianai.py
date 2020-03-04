@@ -7,8 +7,6 @@ dbutils.fs.ls(DATA_PATH)
 # COMMAND ----------
 
 # Print the top 5 lines of first & second files
-dbutils.fs.head(DATA_PATH + '/part-00000', 500)
-
 def printNLines(filepath, n):
   with open(filepath, "r") as f_read:
     num_lines = n
@@ -32,13 +30,45 @@ display(airlines.take(5))
 
 # COMMAND ----------
 
+airlines.count()
+
+# COMMAND ----------
+
+# RUN THIS CELL AS IS
+# This code snippet reads the user directory name, and stores is in a python variable.
+# Next, it creates a folder inside your home folder, which you will use for files which you save inside this notebook.
+username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user')
+userhome = 'dbfs:/user/' + username
+print(userhome)
+AIRLINES_path = userhome + "/AIRLINES/" 
+AIRLINES_path_open = '/dbfs' + AIRLINES_path.split(':')[-1] # for use with python open()
+dbutils.fs.mkdirs(AIRLINES_path)
+
+# COMMAND ----------
+
+# Save initial parquet file
+parquet_file_name = AIRLINES_path + "airline_delays_team20.parquet"
+airlines.write.mode('overwrite').parquet(parquet_file_name)
+
+# COMMAND ----------
+
 # Load all subsequent files without headers and join with dataframe that has headers
-partial_airlines = None
+i = 0
 for file in dbutils.fs.ls(DATA_PATH):
   if ('part' in file.name and file.name != 'part-00000'):
     partial_airlines = spark.read.option("header", "false").csv(file.path)
-    break
-display(airlines.union(partial_airlines).take(5))
+    partial_airlines.write.mode('append').parquet(parquet_file_name)
+    
+    i = i + 1    
+    if (i % 10 == 0):
+      print(str(i) + " Files Processed (Last processed '" + file.path + "')")
+
+# COMMAND ----------
+
+# read from parquet file
+airlines_parquet = spark.read.parquet(parquet_file_name)
+
+airlines_parquet.count()
 
 # COMMAND ----------
 
