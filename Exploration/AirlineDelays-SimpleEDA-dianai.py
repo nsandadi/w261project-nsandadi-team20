@@ -9,13 +9,34 @@ airlines = airlines0.union(airlines_rest)
 
 # COMMAND ----------
 
+# Update datatypes for more accurate aggregations
+from pyspark.sql import types 
+
+airlines = airlines.withColumn("Year", airlines["Year"].cast('int'))
+airlines = airlines.withColumn("Month", airlines["Month"].cast('int'))
+airlines = airlines.withColumn("DayOfMonth", airlines["DayOfMonth"].cast('int'))
+airlines = airlines.withColumn("DayOfWeek", airlines["DayOfWeek"].cast('int'))
+airlines = airlines.withColumn("DepTime", airlines["DepTime"].cast('int'))
+airlines = airlines.withColumn("CRSDepTime", airlines["CRSDepTime"].cast('int'))
+airlines = airlines.withColumn("ArrTime", airlines["ArrTime"].cast('int'))
+airlines = airlines.withColumn("CRSArrTime", airlines["CRSArrTime"].cast('int'))
+airlines = airlines.withColumn("ActualElapsedTime", airlines["ActualElapsedTime"].cast('int'))
+airlines = airlines.withColumn("CRSElapsedTime", airlines["CRSElapsedTime"].cast('int'))
+airlines = airlines.withColumn("AirTime", airlines["AirTime"].cast('int'))
+airlines = airlines.withColumn("ArrDelay", airlines["ArrDelay"].cast('int'))
+airlines = airlines.withColumn("DepDelay", airlines["DepDelay"].cast('int'))
+airlines = airlines.withColumn("Distance", airlines["Distance"].cast('int'))
+airlines = airlines.withColumn("ActualElapsedTime", airlines["ActualElapsedTime"].cast('int'))
+
+airlines = airlines.withColumn("Cancelled", airlines["Cancelled"].cast('int'))
+airlines = airlines.withColumn("Diverted", airlines["Diverted"].cast('int'))
+airlines = airlines.withColumn("IsArrDelayed", airlines["IsArrDelayed"].cast('int'))
+airlines = airlines.withColumn("IsDepDelayed", airlines["IsDepDelayed"].cast('int'))
+
+# COMMAND ----------
+
 print(airlines.columns)
-airlines.printSchema()
-
-# COMMAND ----------
-
-# MAGIC %timeit
-# MAGIC airlines.select('Year').distinct().collect()
+display(airlines.take(1))
 
 # COMMAND ----------
 
@@ -23,30 +44,30 @@ airlines.printSchema()
 
 # COMMAND ----------
 
-# Load data
-data_csv = spark.read.option("header", "true").csv(DATA_PATH+"part-00***")
+# Display number of unique flights by year
+display(airlines.groupBy("Year").count())
 
 # COMMAND ----------
 
-data_csv.write.format("parquet").save(AIRLINES_path+"airline_delays_team20_quick.parquet")
+# Determine distribution of Departure Times
+display(airlines.groupBy("DepTime").count())
+
 
 # COMMAND ----------
 
-airlines_quick_parquet = "airline_delays_team20_quick.parquet"
-
-sum = 0
-for item in dbutils.fs.ls(AIRLINES_path+airlines_quick_parquet+"/"):
-  sum = sum+item.size
-sum
+airlines.groupBy()
 
 # COMMAND ----------
 
-data_parquet = spark.read.parquet(AIRLINES_path+airlines_quick_parquet)
-data_parquet.count()
+
 
 # COMMAND ----------
 
-display(data_parquet.take(10))
+
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
