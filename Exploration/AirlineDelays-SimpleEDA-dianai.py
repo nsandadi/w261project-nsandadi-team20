@@ -36,6 +36,9 @@ airlines = airlines.withColumn("WeatherDelay", airlines["WeatherDelay"].cast('in
 airlines = airlines.withColumn("CarrierDelay", airlines["CarrierDelay"].cast('int'))
 airlines = airlines.withColumn("TaxiOut", airlines["TaxiOut"].cast('int'))
 airlines = airlines.withColumn("TaxiIn", airlines["TaxiIn"].cast('int'))
+airlines = airlines.withColumn("AirTime", airlines["AirTime"].cast('int'))
+airlines = airlines.withColumn("CRSArrTime", airlines["CRSArrTime"].cast('int'))
+airlines = airlines.withColumn("CRSDepTime", airlines["CRSDepTime"].cast('int'))
 
 
 airlines = airlines.withColumn("Cancelled", airlines["Cancelled"].cast('int'))
@@ -95,10 +98,14 @@ display(airlines_mini.describe())
 
 # COMMAND ----------
 
-# do basic variable EDA
-varName = 'Distance'
+# get summary stats for the full datset
+display(airlines.describe())
 
-display(airlines_mini.groupBy(varName).count().orderBy(varName))
+# COMMAND ----------
+
+# do basic variable EDA
+varName = 'Diverted'
+display(airlines.groupBy(varName).count().orderBy(varName))
 
 # COMMAND ----------
 
