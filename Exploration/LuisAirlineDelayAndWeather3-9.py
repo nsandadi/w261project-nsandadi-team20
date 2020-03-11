@@ -28,29 +28,40 @@ airlines_schema = StructType([
     StructField('DAY_OF_MONTH',ShortType(),True),
     StructField('DAY_OF_WEEK',ShortType(),True),
 
+  
     StructField('FL_DATE',DateType(),True), # flight date
 
-    StructField('OP_CARRIER_AIRLINE_ID',ShortType(),True), # Id of the flight's operating carrier
+  
+    StructField('OP_UNIQUE_CARRIER',ShortType(),True), # Id of the flight's operating carrier
 
+  
     # Origin Airport Info
     StructField('ORIGIN_AIRPORT_ID',ShortType(),True),
+    StructField('ORIGIN_AIRPORT_SEQ_ID',IntegerType(),True), # An identification number assigned by US DOT to identify a unique airport at a given point of time
+                                                             # Airport attributes, such as airport name or coordinates, may change over time.
+    StructField('ORIGIN_CITY_MARKET_ID', StringType(), True), # City Market ID is an identification number assigned by US DOT to identify a city market. 
+                                                              # Use this field to consolidate airports serving the same city market.
     StructField('ORIGIN',StringType(),True),
     StructField('ORIGIN_CITY_NAME',StringType(),True),
     StructField('ORIGIN_STATE_ABR',StringType(),True),
     StructField('ORIGIN_STATE_FIPS',ShortType(),True), # Numeric State Identifier
     StructField('ORIGIN_STATE_NM',StringType(),True), # full name
+    StructField('ORIGIN_WAC', StringType(), True), # Origin Airport, World Area Code
 
+  
     # Destination Airport Info
     StructField('DEST_AIRPORT_ID',IntegerType(),True),
-    StructField('DEST_AIRPORT_SEQ_ID',IntegerType(),True), # only destination has squence id: An identification number assigned by US DOT to identify 
-                                                           # a unique airport at a given point of time. Airport attributes, such as airport name or 
-                                                           # coordinates, may change over time.
+    StructField('DEST_AIRPORT_SEQ_ID',IntegerType(),True), # An identification number assigned by US DOT to identify a unique airport at a given point of time.
+                                                           # Airport attributes, such as airport name or coordinates, may change over time.
+    StructField('DEST_CITY_MARKET_ID',StringType(),True), # City Market ID is an identification number assigned by US DOT to identify a city market.
+                                                          # Use this field to consolidate airports serving the same city market.
     StructField('DEST',StringType(),True),
     StructField('DEST_CITY_NAME',StringType(),True),
     StructField('DEST_STATE_ABR',StringType(),True),
     StructField('DEST_STATE_FIPS',ShortType(),True),
     StructField('DEST_STATE_NM',StringType(),True),
-
+    StructField('DEST_WAC', StringType(), True), # Destination Airport, World Area Code
+  
     # Metrics related to departure time & delays
     StructField('CRS_DEP_TIME',StringType(),True), # scheduled departure time; CRS Departure Time (local time: hhmm)
     StructField('DEP_TIME',StringType(),True), # actual time; Actual Departure Time (local time: hhmm) (most of time this is CRS_DEP_TIME + DEP_DALY)
@@ -60,6 +71,13 @@ airlines_schema = StructType([
     StructField('DEP_DELAY_GROUP',IntegerType(),True), # Departure Delay intervals, every (15 minutes from <-15 to >180)
     StructField('DEP_TIME_BLK',StringType(),True), # CRS Departure Time Block, Hourly Intervals
 
+    
+    # Taxi & Wheels Info
+    StructField('TAXI_OUT', DoubleType(), True), # Taxi Out Time, in Minutes
+    StructField('WHEELS_OFF', IntegerType(), True), # Wheels Off Time (local time: hhmm)
+    StructField('WHEELS_ON', IntegerType(), True), # Wheels On Time (local time: hhmm)
+    StructField('TAXI_IN', DoubleType(), True), # Taxi In Time, in Minutes
+  
     # Metrics related to arrival time & delays
     StructField('CRS_ARR_TIME',StringType(),True),
     StructField('ARR_TIME',StringType(),True),
@@ -69,19 +87,32 @@ airlines_schema = StructType([
     StructField('ARR_DELAY_GROUP',IntegerType(),True),
     StructField('ARR_TIME_BLK',StringType(),True),
 
+  
     # Indicators for cancelled & diverted flights (true/false)
     StructField('CANCELLED',BooleanType(),True),
     StructField('DIVERTED',BooleanType(),True),
 
+  
     # Metrics related to elapsed time of flight
     StructField('CRS_ELAPSED_TIME',IntegerType(),True),
     StructField('ACTUAL_ELAPSED_TIME',IntegerType(),True),
-
+    StructField('AIR_TIME', DoubleType(), True),
+  
+  
     StructField('FLIGHTS',ShortType(),True), # should be number of flights, but this is always "1"
 
+  
     # Metrics related to distance of flight
     StructField('DISTANCE',IntegerType(),True),
     StructField('DISTANCE_GROUP',ShortType(),True)
+  
+    
+    # Delay groups
+    StructField('CARRIER_DELAY', DoubleType(), True), # Carrier Delay, in Minutes
+    StructField('WEATHER_DELAY', DoubleType(), True), # Weather Delay, in Minutes
+    StructField('NAS_DELAY', DoubleType(), True), # National Air System Delay, in Minutes
+    StructField('SECURITY_DELAY', DoubleType(), True), # Security Delay, in Minutes
+    StructField('LATE_AIRCRAFT_DELAY', DoubleType(), True) # Late Aircraft Delay, in Minutes	
   ])
 
 
@@ -91,7 +122,7 @@ display(dbutils.fs.ls("dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_a
 
 # COMMAND ----------
 
-airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*a.parquet")
+airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
 display(airlines.sample(False, 0.00001))
 
 mini_airlines = airlines.sample(False, 0.00001)
@@ -99,6 +130,16 @@ mini_airlines = airlines.sample(False, 0.00001)
 # COMMAND ----------
 
 airlines.printSchema()
+
+# COMMAND ----------
+
+# Save a few copies of this datset (just in case....)
+# airlines.write.format("parquet").save("/dbfs/user/team20/airlines-backup3-3-10.parquet")
+
+# COMMAND ----------
+
+# backup files at our disposal -- all the same data as what Luis shared Tuesday 8:36PM PST
+display(dbutils.fs.ls("dbfs/user/team20"))
 
 # COMMAND ----------
 
@@ -140,6 +181,14 @@ display(desc)
 
 # COMMAND ----------
 
+# General EDA to check for unique values/distribution of values/presence of nulls
+varName = 'late_aircraft_delay'
+#display(airlines.groupBy(varName).count().orderBy(airlines[varName].asc()))
+print("Number of distinct values: " + str(airlines.select(varName).distinct().count()))
+print("          Number of nulls: " + str(airlines.filter(airlines[varName].isNull()).count()))
+
+# COMMAND ----------
+
 # Evaluate distribution of records across time (how many records for every month of every year?)
 res = airlines.groupBy("YEAR", "MONTH").count().orderBy("MONTH", "YEAR")
 
@@ -157,7 +206,7 @@ display(res)
 # COMMAND ----------
 
 # General EDA to check for unique values/distribution of values/presence of nulls
-varName = 'Origin_City_'
+varName = 'Distance_Group'
 display(airlines.groupBy(varName).count().orderBy(airlines[varName].asc()))
 
 # COMMAND ----------
@@ -170,65 +219,84 @@ airlines.select(varName).distinct().count()
 # MAGIC %md
 # MAGIC #### EDA Summary
 # MAGIC ##### Time-of-year data
-# MAGIC * `Year`
+# MAGIC * `Year` - ranges 2015-2019
 # MAGIC * `Quarter` -- data well represented across quarters & years
-# MAGIC * `Month` -- data less well represented across months & years
-# MAGIC * `Day_of_Month` -- fewer records on 31st
-# MAGIC * `Day_of_week`
+# MAGIC * `Month` -- data well represented across months & years
+# MAGIC * `Day_of_Month` - ranges 1-31, fewer records on 31st
+# MAGIC * `Day_of_week` - ranges 1-7
 # MAGIC * `FL_Date` - flight data (as a string)
 # MAGIC 
 # MAGIC ##### Airline info
-# MAGIC * `Op_Carrier_Airline_Id` - airline Id, total of 19 distinct airlines
+# MAGIC * `Op_Unique_Carrier` - airline Id, total of 19 distinct airlines
 # MAGIC 
 # MAGIC ##### Origin Airport Info
-# MAGIC * `Origin_Airport_Id` - 370 distinct numeric values
-# MAGIC * `Origin` - 370 distinct alphanumeric values (e.g. "SEA")
-# MAGIC * `Origin_city_name` - 361 distinct values (e.g. "Seattle, WA") ----- seems odd 361 < 360...
+# MAGIC * `Origin_Airport_Id` - 371 distinct numeric values
+# MAGIC * `Origin_Airport_Seq_Id` - 688 distinct numeric values
+# MAGIC * `Origin_City_Market_Id` - 344 distinct values
+# MAGIC * `Origin` - 371 distinct alphanumeric values (e.g. "SEA")
+# MAGIC * `Origin_city_name` - 362 distinct values (e.g. "Seattle, WA") ----- seems odd 362 < 371...
 # MAGIC * `Origin_state_abr` - 53 distinct values (e.g. "WA")
 # MAGIC * `Origin_state_FIPS` - 53 distinct values (ranges 1-78)
-# MAGIC * `Origin_state_nm` - 53 distinct values (eg. "Washington")
+# MAGIC * `Origin_state_nm` - 53 distinct values (e.g. "Washington")
+# MAGIC * `Origin_WAC` - 53 distinct values (ranges 1-93)
 # MAGIC 
 # MAGIC ##### Destination Airport Info
-# MAGIC * `Dest_Airport_id` - 368 distinct values (numeric)
-# MAGIC * `Dest_Airort_Seq_id` - 390 distinct value (numeric) ----- seems odd don't have equivalent for origin...
-# MAGIC * `Dest` - 368 distinct values (e.g. "SEA") 
-# MAGIC * `Dest_City_Name` - 360 distinct values (e.g. "Seattle, WA") ------ seems odd 360 < 368...
+# MAGIC * `Dest_Airport_id` - 369 distinct values (numeric)
+# MAGIC * `Dest_Airort_Seq_id` - 686 distinct value (numeric)
+# MAGIC * `Dest_City_Market_Id` - 343 distinct values
+# MAGIC * `Dest` - 369 distinct values (e.g. "SEA") 
+# MAGIC * `Dest_City_Name` - 361 distinct values (e.g. "Seattle, WA") ------ seems odd 361 < 369...
 # MAGIC * `Dest_State_Abr` - 53 distinct values (e.g. "WA")
 # MAGIC * `Dest_State_FIPS` - 53 distinct values (ranges 1-78)
 # MAGIC * `Dest_State_Nm` - 53 distinct values (e.g. "Washington")
+# MAGIC * `Dest_WAC` - 53 distinct values (ranges 1-93)
 # MAGIC 
 # MAGIC ##### Departure-Related Info
-# MAGIC * `CRS_Dep_Time` - ranges 0001 - 2359, 1421 values
-# MAGIC * `Dep_Time` - 503,662 nulls, ranges 0001 - 2400, 1441 values
-# MAGIC * `Dep_Delay` - 510,420 nulls, ranges -204 to 2672, 1614 values
-# MAGIC * `Dep_Delay_New` - 510,420 nulls, ranges 0 to 2672, 1543 values (zero-ed out all negatives)
-# MAGIC * `Dep_Del15` - 510,420 nulls, 29138841 with "0" value, 6419426 with "1" value
-# MAGIC * `Dep_Delay_Group` - 510,420 nulls, ranges -2 to 12, 16 values
+# MAGIC * `CRS_Dep_Time` - ranges 0001 - 2359, 1433 values
+# MAGIC * `Dep_Time` - 472,320 nulls, ranges 0001 - 2400, 1441 values
+# MAGIC * `Dep_Delay` - 477,296 nulls, ranges -234 to 2755, 1749 values
+# MAGIC * `Dep_Delay_New` - 477,296 nulls, ranges 0 to 2755, 1655 values (zero-ed out all negatives)
+# MAGIC * `Dep_Del15` - 477,296 nulls, 25576004 with "0" value, 5693541 with "1" value
+# MAGIC * `Dep_Delay_Group` - 477,296 nulls, ranges -2 to 12, 16 values
 # MAGIC * `Dep_Time_Blk` - hour time blocks, no nulls, 19 values (e.g. 2300-2359); aggregated variable
 # MAGIC 
+# MAGIC ##### Taxi & Wheels Info
+# MAGIC * `Taxi_out` - 486,417 nulls, ranges from 0 to 227, 195 distinct values
+# MAGIC * `Wheels_Off` - 486,412 nulls, ranges from 1 to 2400, 1441 distinct values
+# MAGIC * `Wheels_On` - 501,924 nulls, ranges from 1 to 2400, 1441 distinct values
+# MAGIC * `Taxi_in` - 501,924 nulls, ranges from 0 to 414, 291 distinct values
+# MAGIC 
 # MAGIC ##### Arrival-Related Info
-# MAGIC * `CRS_Arr_Time` - ranges 0001 - 2359, 1440 values
-# MAGIC * `Arr_Time` - 535,504 nulls, ranges 0001-2400, 1441 values
-# MAGIC * `Arr_Delay` - 612,606 nulls, ranges -152 to 2649, 1634 values
-# MAGIC * `Arr_Delay_New` - 612,606 nulls, ranges 0 to 2649, 1529 values
-# MAGIC * `Arr_Del15` - 612,606 nulls,  28899765 with "0" value, 6556316 with "1" value
-# MAGIC * `Arr_Delay_Group` - 612,606 nulls, ranges -2 to 12, 16 values, seems to follow a normal distribution
+# MAGIC * `CRS_Arr_Time` - ranges 0001 - 2400, 1440 values
+# MAGIC * `Arr_Time` - 501,922 nulls, ranges 0001-2400, 1441 values
+# MAGIC * `Arr_Delay` - 570,640 nulls, ranges -1238 to 2695, 1761 values
+# MAGIC * `Arr_Delay_New` - 570,640 nulls, ranges 0 to 2695, 1641 values
+# MAGIC * `Arr_Del15` - 570,640 nulls, 25377086 with "0" value, 5799115 with "1" value
+# MAGIC * `Arr_Delay_Group` - 570,640 nulls, ranges -2 to 12, 16 values, seems to follow a normal distribution
 # MAGIC * `Arr_Time_Blk` - hour time blocks, no nulls, 19 values (e.g. 2300-2359); aggregated variable`
 # MAGIC 
 # MAGIC ##### Cancelled/Diverted Indicators
-# MAGIC * `Cancelled` - 35,545,506 not cancelled; 523,181 cancelled
-# MAGIC * `Diverted` - 35,982,737 not diverted; 85,950 diverted
+# MAGIC * `Cancelled` - 31,256,894 not cancelled; 489,947 cancelled
+# MAGIC * `Diverted` - 31,668,733 not diverted; 78,108 diverted
 # MAGIC 
 # MAGIC ##### Elapsed Time Info
-# MAGIC * `CRS_Elapsed_Time` - 172 null values, range -60 to 948, 643 distinct values
-# MAGIC * `Acutal_Elapsed_Time` - 609,087 null values, range 14 to 1604, 730 values
+# MAGIC * `CRS_Elapsed_Time` - 164 null values, range -99 to 948, 633 distinct values
+# MAGIC * `Acutal_Elapsed_Time` - 568,042 null values, range 14 to 1604, 739 values
+# MAGIC * `Air_Time` - 568,042 null values, ranges 4 to 1557, 705 values
 # MAGIC 
 # MAGIC ##### Flights
 # MAGIC * `Flights` - number of flights, which is always 1
 # MAGIC 
 # MAGIC ##### Distance Info
-# MAGIC * `Distance` - ranges from 21 to 5095, 1643 distinct values
+# MAGIC * `Distance` - ranges from 21 to 5095, 1689 distinct values
 # MAGIC * `Distance_Group` - aggregated variable, ranges 1-11, 11 total values
+# MAGIC 
+# MAGIC ##### Delay Info
+# MAGIC * `Carrier_Delay` - 25,947,727 nulls, ranges 0 to 2695, 1597 distinct values
+# MAGIC * `Weather_Delay` - 25,947,727 nulls, ranges 0 to 2692, 1241 distinct values
+# MAGIC * `NAS_Delay` - 25,947,727 nulls, ranges 0 to 1848, 1249 distinct values
+# MAGIC * `Security_Delay` - 25,947,727 nulls, ranges 0 to 1078, 315 distinct values
+# MAGIC * `Late_Aircraft_Delay` - 25,947,727 nulls, ranges 0 to 2454, 1262 distinct values
 
 # COMMAND ----------
 
