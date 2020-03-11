@@ -136,8 +136,6 @@ airlines.printSchema()
 # Save a few copies of this datset (just in case....)
 # airlines.write.format("parquet").save("/dbfs/user/team20/airlines-backup3-3-10.parquet")
 
-# COMMAND ----------
-
 # backup files at our disposal -- all the same data as what Luis shared Tuesday 8:36PM PST
 display(dbutils.fs.ls("dbfs/user/team20"))
 
@@ -302,6 +300,8 @@ airlines.select(varName).distinct().count()
 
 # MAGIC %md # Weather
 # MAGIC https://data.nodc.noaa.gov/cgi-bin/iso?id=gov.noaa.ncdc:C00532
+# MAGIC 
+# MAGIC Full Dataset Description: https://www1.ncdc.noaa.gov/pub/data/noaa/isd-format-document.pdf
 
 # COMMAND ----------
 
@@ -362,11 +362,79 @@ weather.count()
 
 # COMMAND ----------
 
+# Save a few copies of this datset (just in case....)
+#weather.write.format("parquet").save("/dbfs/user/team20/weather-backup3-3-10.parquet")
+
+# backup files at our disposal -- all the same data as what Luis shared Tuesday 8:36PM PST
+display(dbutils.fs.ls("dbfs/user/team20"))
+
+# COMMAND ----------
+
 display(weather.where('DATE =="DATE"'))
 
 # COMMAND ----------
 
+mini_weather = weather.sample(False, 0.0000001)
+
+dispaly(mini_weather)
+
+# COMMAND ----------
+
 display(weather.describe())
+
+# COMMAND ----------
+
+# General EDA to check for unique values/distribution of values/presence of nulls
+varName = 'CIG'
+#display(weather.groupBy(varName).count().orderBy(weather[varName].desc()))
+print("Number of distinct values: " + str(weather.select(varName).distinct().count()))
+print("          Number of nulls: " + str(weather.filter(weather[varName].isNull()).count()))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### EDA Summary
+# MAGIC ##### Record Metadata
+# MAGIC * `Station` - weather station identifier, 15,194 distinct values; format: "2019-12-31T23:59:00", minute granularity
+# MAGIC * `Date` - ranges from 2015 to 2019, down to the minute granularity for multiple (but not all) locations
+# MAGIC * `Source` - alphanumeric (1, 2, 4, 6, 7, 8, I, K, 0), total of 9 distinct values
+# MAGIC * `Latitutde` - ranges -0.0166667 to 9.993861, 24,416 distinct values, no missing values indicators
+# MAGIC * `Longitude` - ranges -0.005456 to 99.9666666, 34,609 distinct values, no missing values indicators
+# MAGIC * `Elevation` - ranges +0000 to 999.1, 5338 distinct values
+# MAGIC * `Name` - 4,715,523 null values, 14,857 distinct values (e.g. "068 BAFFIN BAY POINT OF ROCKS TX, TX US")
+# MAGIC * `Report_Type` - 14 distinct values (e.g. "FM-12")
+# MAGIC * `Call_Sign` - 30 are blank values; 449,370,610 take on value 99999 (mising values), 2211 distinct values (e.g. "K1A6 ")
+# MAGIC * `Quality_Control` - 2 Distinct values "V030" (26651613 records) and "V020" (600342723 records)
+# MAGIC 
+# MAGIC ##### Weather Data
+# MAGIC * `WND` - (e.g. "001,1,9,9999,9"  "999,9,V,9999,9"); entries with multiple "9"'s are likely mising values, but need to check with documentation. This variable likely holds mulitple metrics relate to wind direction & speed that are comma-separated, and need to refer to documentation for clarification here (need to do data cleanup); 172927 distinct values
+# MAGIC * `CIG` - (e.g. "00000,1,9,9"  "99999,9,W,N"); 5715 distinct values
+# MAGIC * `VIS` -
+# MAGIC * `TMP` -
+# MAGIC * `DEW` -
+# MAGIC * `SLP` -
+# MAGIC * `AA1` -
+# MAGIC * `AA2` -
+# MAGIC * `AJ1` -
+# MAGIC * `AY1` -
+# MAGIC * `AY2` -
+# MAGIC * `GA1` -
+# MAGIC * `GA2` -
+# MAGIC * `GA3` -
+# MAGIC * `GE1` -
+# MAGIC * `GF1` -
+# MAGIC * `IA1` -
+# MAGIC * `KA1` -
+# MAGIC * `KA2` -
+# MAGIC * `MA1` -
+# MAGIC * `MD1` -
+# MAGIC * `MW1` -
+# MAGIC * `OC1` -
+# MAGIC * `OD1` -
+# MAGIC * `SA1` -
+# MAGIC * `UA1` -
+# MAGIC * `REM` -
+# MAGIC * `EQD` -
 
 # COMMAND ----------
 
