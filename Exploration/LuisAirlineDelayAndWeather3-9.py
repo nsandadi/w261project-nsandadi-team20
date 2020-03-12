@@ -94,17 +94,17 @@ airlines_schema = StructType([
 
   
     # Metrics related to elapsed time of flight
-    StructField('CRS_ELAPSED_TIME',IntegerType(),True),
-    StructField('ACTUAL_ELAPSED_TIME',IntegerType(),True),
-    StructField('AIR_TIME', DoubleType(), True),
+    StructField('CRS_ELAPSED_TIME',IntegerType(),True),  # CRS Elapsed Time of Flight, in Minutes
+    StructField('ACTUAL_ELAPSED_TIME',IntegerType(),True),  # Elapsed Time of Flight, in Minutes		
+    StructField('AIR_TIME', DoubleType(), True),  # Flight Time, in Minutes
   
   
     StructField('FLIGHTS',ShortType(),True), # should be number of flights, but this is always "1"
 
   
     # Metrics related to distance of flight
-    StructField('DISTANCE',IntegerType(),True),
-    StructField('DISTANCE_GROUP',ShortType(),True)
+    StructField('DISTANCE',IntegerType(),True),  # Distance between airports (miles)		
+    StructField('DISTANCE_GROUP',ShortType(),True)  # Distance Intervals, every 250 Miles, for Flight Segment
   
     
     # Delay groups
