@@ -214,6 +214,10 @@ airlines.select(varName).distinct().count()
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### EDA Summary
 # MAGIC ##### Time-of-year data
@@ -295,6 +299,34 @@ airlines.select(varName).distinct().count()
 # MAGIC * `NAS_Delay` - 25,947,727 nulls, ranges 0 to 1848, 1249 distinct values
 # MAGIC * `Security_Delay` - 25,947,727 nulls, ranges 0 to 1078, 315 distinct values
 # MAGIC * `Late_Aircraft_Delay` - 25,947,727 nulls, ranges 0 to 2454, 1262 distinct values
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC #### Features & What we want to do with them -- Task 2
+# MAGIC 
+# MAGIC * **Features**
+# MAGIC   - **Departure Day & Departure Time**
+# MAGIC       - Use variables `Day_Of_Week` (categorical variable), `CRS_Dep_Time` (group aggregation)
+# MAGIC       - interaction between the two terms
+# MAGIC   - **Using `Dep_Delay` for estimating Arrival Delay**
+# MAGIC       - normalize the `Dep_Delay` variable
+# MAGIC   - **Name of Airline**
+# MAGIC       - Use `Unique_Carrier` as categorical variable
+# MAGIC 
+# MAGIC * **Outcome Variables:**
+# MAGIC   - Model 1: Predicting Departure Delay (based on `Dep_Del***` (need to pick which, likely `Dep_Delay`))
+# MAGIC   - Model 2: Predicting Arrival Delay (based on `Arr_Del***` (need to pick which, likely `Arr_Delay`))
+# MAGIC   
+# MAGIC   
+# MAGIC * **Priorities (in-order)**
+# MAGIC   - Predict models as 0/1 indicators of departure/arrival delay, using only basic airlines dataset
+# MAGIC   - Incorporate Holidays into models
+# MAGIC   - Predict models with depature/arrival delay amounts using only basic airlines dataset
+# MAGIC   - Incorporate Weather data (& station data)
+# MAGIC   - Incorporating airlines dataset metadata from ingesting dataset in graph (e.g. to get congestion data)
+# MAGIC   - Predicting specific categories of delay (e.g. Carrir_Delay, Weather_Delay)
 
 # COMMAND ----------
 
@@ -395,8 +427,8 @@ print("          Number of nulls: " + str(weather.filter(weather[varName].isNull
 # MAGIC %md
 # MAGIC #### EDA Summary
 # MAGIC ##### Record Metadata
-# MAGIC * `Station` - weather station identifier, 15,194 distinct values; format: "2019-12-31T23:59:00", minute granularity
-# MAGIC * `Date` - ranges from 2015 to 2019, down to the minute granularity for multiple (but not all) locations
+# MAGIC * `Station` - weather station identifier, 15,194 distinct values; 
+# MAGIC * `Date` - format: "2019-12-31T23:59:00", minute granularity; ranges from 2015 to 2019, down to the minute granularity for multiple (but not all) locations
 # MAGIC * `Source` - alphanumeric (1, 2, 4, 6, 7, 8, I, K, 0), total of 9 distinct values
 # MAGIC * `Latitutde` - ranges -0.0166667 to 9.993861, 24,416 distinct values, no missing values indicators
 # MAGIC * `Longitude` - ranges -0.005456 to 99.9666666, 34,609 distinct values, no missing values indicators
