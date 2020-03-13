@@ -204,8 +204,8 @@ display(res)
 # COMMAND ----------
 
 # General EDA to check for unique values/distribution of values/presence of nulls
-varName = 'Distance_Group'
-display(airlines.groupBy(varName).count().orderBy(airlines[varName].asc()))
+varName = 'Op_Unique_Carrier'
+display(airlines.select(varName, 'Dep_Delay').groupBy(varName).mean())
 
 # COMMAND ----------
 
@@ -214,7 +214,24 @@ airlines.select(varName).distinct().count()
 
 # COMMAND ----------
 
+# Explor when Arr_Delay is null
+res = airlines.select((airlines['Cancelled']), \
+                      (airlines['Diverted']), \
+                      (airlines.DEP_DELAY.isNull()).alias("IsDepDelayNull"), \
+                      (airlines.ARR_DELAY.isNull()).alias("IsArrDelayNull")) \
+              .groupBy('Cancelled', 'Diverted', 'IsDepDelayNull', 'IsArrDelayNull').count().orderBy('Cancelled', 'Diverted', 'IsDepDelayNull', 'IsArrDelayNull')
 
+# Note that when all values are defined, (last two rows), the condition doesn't always hold
+display(res)
+
+# COMMAND ----------
+
+display(airlines.select('CRS_Elapsed_Time', 'Actual_Elapsed_Time', (airlines['Air_Time'] + airlines['Taxi_in'] + airlines['Taxi_out']).alias("sum"), 'Air_Time', 'Taxi_in', 'Taxi_out').take(1000))
+
+# COMMAND ----------
+
+res = airlines.select("Dep_Delay", "Diverted").take(10)
+display(res)
 
 # COMMAND ----------
 
@@ -327,6 +344,98 @@ airlines.select(varName).distinct().count()
 # MAGIC   - Incorporate Weather data (& station data)
 # MAGIC   - Incorporating airlines dataset metadata from ingesting dataset in graph (e.g. to get congestion data)
 # MAGIC   - Predicting specific categories of delay (e.g. Carrir_Delay, Weather_Delay)
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC 
+# MAGIC #### First Model Summary: Predicting Departure Delay (notes from 3/12)
+# MAGIC 
+# MAGIC Variables to predict Departure Delay (1/0)
+# MAGIC Inference Time: 6 hours before CRS_Dep_Time
+# MAGIC 
+# MAGIC Year, Month, Day of week, Day of Month
+# MAGIC - Day of Month -- include when we join on holidays
+# MAGIC - Year by itself -- continuous variable
+# MAGIC - Month by itself -- categorical 
+# MAGIC - Day of week -- categorical
+# MAGIC 
+# MAGIC Unique_Carrer
+# MAGIC - categorical
+# MAGIC 
+# MAGIC Origin-attribute
+# MAGIC - categorical
+# MAGIC 
+# MAGIC Destination-attribute
+# MAGIC - categorical
+# MAGIC 
+# MAGIC CRS_Dep_Time, CRS_Arr_Time
+# MAGIC - If continuous: minutes after midnight
+# MAGIC - If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+# MAGIC - can use continuous and/or categorical
+# MAGIC - Interaction of Day of week with CRS_Dep_Time (by hr)
+# MAGIC - Interaction of Day of week with CRS_Arr_Time (by hr) -- might not be useful, but can eval with L1 Norm
+# MAGIC 
+# MAGIC CRS_Elapsed_Time
+# MAGIC - If continuous: minutes after midnight
+# MAGIC - If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+# MAGIC - can use continuous and/or categorical
+# MAGIC 
+# MAGIC Distance & Distance_Group
+# MAGIC - experiment with using either or
+# MAGIC - have both categorical & continuous depending on which we want to use
+# MAGIC 
+# MAGIC Outcome: Boolean(Dep_Delay > 15)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC #### Second Model Summary: Predicting Arrival Delay (notes from 3/12)
+# MAGIC 
+# MAGIC Variables to predict Arrival Delay (1/0)
+# MAGIC Inference Time: The moment the plane is in the sky
+# MAGIC 
+# MAGIC Year, Month, Day of week, Day of Month
+# MAGIC - Day of Month -- include when we join on holidays
+# MAGIC - Year by itself -- continuous variable
+# MAGIC - Month by itself -- categorical 
+# MAGIC - Day of week -- categorical
+# MAGIC 
+# MAGIC Unique_Carrer
+# MAGIC - categorical
+# MAGIC 
+# MAGIC Origin-attribute
+# MAGIC - categorical
+# MAGIC 
+# MAGIC Destination-attribute
+# MAGIC - categorical
+# MAGIC 
+# MAGIC CRS_Dep_Time, Dep_Time, Dep_Delay, etc
+# MAGIC - If continuous: minutes after midnight
+# MAGIC - If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+# MAGIC - can use continuous and/or categorical
+# MAGIC - Interaction of Day of week with CRS_Dep_Time (by hr)
+# MAGIC 
+# MAGIC CRS_Arr_Time
+# MAGIC - Interaction of Day of week with CRS_Arr_Time (by hr)
+# MAGIC 
+# MAGIC Taxi_out
+# MAGIC 
+# MAGIC CRS_Elapsed_Time
+# MAGIC - If continuous: minutes after midnight
+# MAGIC - If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+# MAGIC - can use continuous and/or categorical
+# MAGIC 
+# MAGIC Distance & Distance_Group
+# MAGIC - experiment with using either or
+# MAGIC - have both categorical & continuous depending on which we want to use
+# MAGIC 
+# MAGIC Carrier_Delay, Late_Aircraft_Delay (plane arrived late for flight), Security_Delay
+# MAGIC - If continuous: minutes after midnight
+# MAGIC - If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+# MAGIC 
+# MAGIC Outcome: Boolean(Arr_Delay > 15)
 
 # COMMAND ----------
 
