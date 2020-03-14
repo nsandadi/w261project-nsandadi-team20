@@ -1,0 +1,43 @@
+Variables to predict Arrival Delay (1/0)
+Inference Time: The moment the plane is in the sky
+
+Year, Month, Day of week, Day of Month
+- Day of Month -- include when we join on holidays
+- Year by itself -- continuous variable
+- Month by itself -- categorical 
+- Day of week -- categorical
+
+Unique_Carrer
+- categorical
+
+Origin-attribute
+- categorical
+
+Destination-attribute
+- categorical
+
+CRS_Dep_Time, Dep_Time, Dep_Delay, etc
+- If continuous: minutes after midnight
+- If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+- can use continuous and/or categorical
+- Interaction of Day of week with CRS_Dep_Time (by hr)
+
+CRS_Arr_Time
+- Interaction of Day of week with CRS_Arr_Time (by hr)
+
+Taxi_out
+
+CRS_Elapsed_Time
+- If continuous: minutes after midnight
+- If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+- can use continuous and/or categorical
+
+Distance & Distance_Group
+- experiment with using either or
+- have both categorical & continuous depending on which we want to use
+
+Carrier_Delay, Late_Aircraft_Delay (plane arrived late for flight), Security_Delay
+- If continuous: minutes after midnight
+- If categorical: groups of 15 minutes, 30 minutes, or 1 hr (binning)
+
+Outcome: Boolean(Arr_Delay > 15)

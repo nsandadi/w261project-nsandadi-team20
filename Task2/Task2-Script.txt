@@ -1,0 +1,37 @@
+Script
+
+** Data Ingestion, Split data (train/test), data cleaning
+- Data ingestion as parquet (in columnar format for EDA)
+- Split training data to be years 2015-2018, test data as 2019
+- Data cleaning: 
+    - Remove entries where cancelled = 1, diverted = 1, 
+	  Dep_Delay = null or Arr_Delay = null
+	-Remove outliers that are past 2-3 std dev (or by hand) 
+	 (e.g. for Actual_Elapsed_Time, 1604 was max but ~800 was 2nd highest)
+
+** First Model: Departure Delay
+- Predict 0/1 outcomes (or probability of a delay in the case of logistic regression + threshold)
+- Inference time to be 6 hours before CRS_Dep_Time (so only use features available at that point in time to do prediction for Dep_Delay) -- includes vars related to
+   - time of year (year = continuous, day of month, month, day of week as categorical)
+   - airline carrier, origin & destination airport (categorical)
+   - Scheduled timing of flight (departure, arrival, elapsed)
+      - transforming into categorical variables via binning by hours
+   - interaction terms between day of week & CRS_Arr_Time
+   - distance (continuous or categorical, experiment with both)   
+
+** Second Model: Arrival Delay
+- Predict 0/1 outcomes (or probability of a delay in the case of logistic regression + threshold)
+- Inference time to be right after plane departure (taken off and is in the sky)
+   - All variables in Departure Delay Model + others
+   - Additional variables known at this point in time
+       - variables specific to the actual departure (Dep_Time, Dep_Delay, etc) (categorical)
+       - Taxi_out (specific to taxi time when departing)
+	   - Specific delay variables (Carrier_Delay, Late_AircraftDelay, Security_Delay)
+	       - all other delays are dependent on departure & arrival delays, so don't include when predicting arrival delay
+
+** Encoding outcomes, Feature Transformations, Feature Selection
+- Encoding Outcomes for both models (e.g. Boolean(Arr_Delay > 15))
+   - defining any minutes delay or a more significant delay (e.g. greater than 15 minutes -- `Arr_Del15` & `Dep_Del15`)
+   - enable model scoring (precision, recall, etc)
+- Data Normalization & binning of variables
+- Feature Selection -- can do via PCA, Lasso with our baseline models, forward/backward selection 

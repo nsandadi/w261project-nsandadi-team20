@@ -1,0 +1,17 @@
+Section 2: First Model: Departure Delay
+
+There are two core models we'll construct: the first will predict whether a flight's departure will be delayed. We'll assume the time of inference to be several hours before the scheduled departure time, so we'll only consider features we'd know at inference time.
+
+To capture the time of year, we'll keep year as continuous but transform month, day of month, and day of week to be categorical to capture seasonal patterns.
+
+We'll also look to bin values of the scheduled departure, arrival, and elapsed time features. This way, we can capture delay patterns specific to a time of day, rather than capturing a linear relationship on "minutes since midnight". We'll consider interacting the scheduled times with the day of the week as well, in case certain times are more congested on certain days of the week.
+
+Finally, we'll include static attributes of the flight, such as carrier, origin, and destination, as categorical variables, and consider using the flight's distance in categorical or continuous form. 
+
+-------------------------------------------------------------------------
+
+Section 3: Second Model: Arrival Delay
+
+For the second model, we'll predict whether a flight's arrival will be delayed. For this, we'll assume the time of inference to be right after the plane departs, so we'll only consider features we'd know at this time.
+
+In addition to the variables considered for our first model, we'll consider variables related to the actual departure that took place. This includes variables such as departure time and departure delay, which we can bin as discussed in the first model. We can look at specific delay times related to taxi-ing out, the carrier, late aircraft arrival, and security issues, but we'll defer looking at all other delays, such as weather delay, since these depend on the flight's arrival. 
