@@ -74,6 +74,7 @@ mini_train_svm, train_svm, val_svm, test_svm = SplitDataset("svm") # For Shaji
 # MAGIC     - Departure Delay Model Spec: https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/610163713970940/command/4370588189239412 
 # MAGIC     - Arrival Delay Model Spec: https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/610163713970940/command/4370588189239413
 # MAGIC - Train on mini training set using the models, validate on (mini) validation set
+# MAGIC - See about using algorithm via MLLib, own implementation in spark, etc
 # MAGIC - Generating metrics for precision and recall (on mini_train & validation set)
 # MAGIC - If mini_train is looking good, go to the full train dataset
 # MAGIC - Play around with using different variables, fine tuning, transforming the variables, doing variable selection (e.g. with regularization / PCA?)
