@@ -7,12 +7,76 @@ airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/dat
 
 # COMMAND ----------
 
-# Split airlines data into train, dev, test
-test = airlines.where('Year = 2019') # held out
-train, val = airlines.where('Year != 2019').randomSplit([7.0, 1.0], 6)
+# Filter to datset with entries where diverted != 1, cancelled != 1, dep_delay != Null, and arr_delay != Null
+airlines = airlines.where('DIVERTED != 1') \
+                   .where('CANCELLED != 1') \
+                   .filter(airlines['DEP_DEL15'].isNotNull()) \
+                   .filter(airlines['ARR_DEL15'].isNotNull())
 
-# Select a mini subset for the training dataset (~2000 records)
-mini_train = train.sample(fraction=0.0001, seed=6)
+print(airlines.count())
+
+# COMMAND ----------
+
+def SplitDataset(model_name):
+  # Split airlines data into train, dev, test
+  test = airlines.where('Year = 2019') # held out
+  train, val = airlines.where('Year != 2019').randomSplit([7.0, 1.0], 6)
+
+  # Select a mini subset for the training dataset (~2000 records)
+  mini_train = train.sample(fraction=0.0001, seed=6)
+
+  print("train_" + model_name + " size = " + str(train.count()))
+  print("mini_train_" + model_name + " size = " + str(mini_train.count()))
+  print("val_" + model_name + " size = " + str(val.count()))
+  print("test_" + model_name + " size = " + str(test.count()))
+  
+  return (mini_train, train, val, test) 
+
+mini_train, train, val, test = SplitDataset("")
+
+# COMMAND ----------
+
+display(train.groupBy('DEP_DEL15').count())
+
+# COMMAND ----------
+
+# Variable Transformations
+
+
+# COMMAND ----------
+
+# Prep Datasets for all 4 Models
+mini_train_lr, train_lr, val_lr, test_lr = SplitDataset("lr") # For Shobha
+mini_train_nb, train_nb, val_nb, test_nb = SplitDataset("nb") # For Navya
+mini_train_dt, train_dt, val_dt, test_dt = SplitDataset("dt") # For Diana
+mini_train_svm, train_svm, val_svm, test_svm = SplitDataset("svm") # For Shaji
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Task 3 & General Model Exploration
+# MAGIC 
+# MAGIC #### Models to Explore
+# MAGIC - Logistic Regression - Shobha
+# MAGIC - Naive Bayes - Navya
+# MAGIC - Decision Trees - Diana
+# MAGIC - Support Vector Machines - Shaji
+# MAGIC 
+# MAGIC Based on analysis of these models, we'll want to determine what is likely the best model given mini training dataset (or even what is the best ensemble of models for our task).
+# MAGIC 
+# MAGIC #### Tasks for each of us (with our given model)
+# MAGIC - You can work in this notebook in a separate cell, or construct a separate notebook--whatever works
+# MAGIC - There's a copy of the dataset splits prepped in the cell above for each model (e.g. train_lr for training set of Logistic Regression)
+# MAGIC    - This way, if we do any variable transformations to a dataset for a given model, this will not affect others models
+# MAGIC - Do appropriate data transformations -- share with others as we're doing it in slack
+# MAGIC - Use `Dep_Del15` are the outcome variables (as indicator variables) (if curious & have time, do `Arr_Del15`)
+# MAGIC - Use variables discussed from last week's deliverable, along with transformation discussed (if they make sense for the model)
+# MAGIC     - Departure Delay Model Spec: https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/610163713970940/command/4370588189239412 
+# MAGIC     - Arrival Delay Model Spec: https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/610163713970940/command/4370588189239413
+# MAGIC - Train on mini training set using the models, validate on (mini) validation set
+# MAGIC - Generating metrics for precision and recall (on mini_train & validation set)
+# MAGIC - If mini_train is looking good, go to the full train dataset
+# MAGIC - Play around with using different variables, fine tuning, transforming the variables, doing variable selection (e.g. with regularization / PCA?)
 
 # COMMAND ----------
 
