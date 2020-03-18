@@ -81,3 +81,120 @@ mini_train_svm, train_svm, val_svm, test_svm = SplitDataset("svm") # For Shaji
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC 
+# MAGIC ## Decision Trees: Diana
+# MAGIC 
+# MAGIC #### Things to try
+# MAGIC - Transforming variables as decribed before
+# MAGIC - Saving data in avro format instead of parquet (since this is a row-wise storage)
+# MAGIC - Using data frames & RDDs?
+# MAGIC 
+# MAGIC Following example: https://databricks.com/blog/2019/05/02/detecting-financial-fraud-at-scale-with-decision-trees-and-mlflow-on-databricks.html
+
+# COMMAND ----------
+
+sc = spark.sparkContext
+
+# COMMAND ----------
+
+# Write data to avro
+mini_train_dt.write.format("com.databricks.spark.avro").save("/dbfs/user/team20/airlines_mini_train.avro")
+train_dt.write.format("com.databricks.spark.avro").save("/dbfs/user/team20/airlines_train.avro")
+val_dt.write.format("com.databricks.spark.avro").save("/dbfs/user/team20/airlines_val.avro")
+test_dt.write.format("com.databricks.spark.avro").save("/dbfs/user/team20/airlines_test.avro")
+
+# COMMAND ----------
+
+# Re-read from avro file
+mini_train_dt = spark.read.format("com.databricks.spark.avro").load("/dbfs/user/team20/airlines_mini_train.avro")
+val_dt = spark.read.format("com.databricks.spark.avro").load("/dbfs/user/team20/airlines_val.avro")
+
+# COMMAND ----------
+
+# Convert to rdd (for now, might not use)
+mini_train_rdd = mini_train_dt.rdd
+val_rdd = val_dt.rdd
+
+# COMMAND ----------
+
+# Extract only columns of interest
+def ExtractColumnsForDepDelayModel(df):
+  return df.select('Dep_Del15', 'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Op_Unique_Carrier', 'Origin', 'Dest', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group')
+
+mini_train_dep = ExtractColumnsForDepDelayModel(mini_train_dt)
+val_dep = ExtractColumnsForDepDelayModel(val_dt)
+
+# COMMAND ----------
+
+# Register table so it is accessible via SQL Context
+mini_train_dep.createOrReplaceTempView("mini_train_dep")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Looks like we can run SQL directly for EDA -- want to return back to this
+# MAGIC select Dep_Del15 from mini_train_dep
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select count(distinct Dest) from mini_train_dep
+
+# COMMAND ----------
+
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.classification import DecisionTreeClassifier
+
+# Encodes a string column of labels to a column of label indicies for non-numerical values
+# https://stackoverflow.com/questions/36942233/apply-stringindexer-to-several-columns-in-a-pyspark-dataframe
+indexers = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in ['Op_Unique_Carrier', 'Origin', 'Dest']]
+
+# VectorAssembler is a transformer that combines a given list of columns into a single vector column
+# Take all features and merge in
+# TODO: Do variable Transformations and discussed previously
+va = VectorAssembler(inputCols = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
+                                  #'Op_Unique_Carrier_idx', 'Origin_idx', 'Dest_idx', 
+                                  #'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 
+                                  'Distance_Group'], 
+                     outputCol = "features")
+
+# Use the Decision Tree Classifier Model
+# Set max bin to be greater than the number of distinct values for a given feature
+# Also commented out more fine-grained feature for now
+dt = DecisionTreeClassifier(labelCol = "Dep_Del15", featuresCol = "features", seed = 6, maxDepth = 5, maxBins=32)
+
+# Create our pipeline stages
+pipeline = Pipeline(stages=indexers + [va, dt])
+
+# View the Decision Tree Model
+dt_model = pipeline.fit(mini_train_dep)
+
+# COMMAND ----------
+
+# Visualize the decision tree model that was trained
+display(dt_model.stages[-1])
+
+# COMMAND ----------
+
+# Do Model eval with cross validator
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+
+paramGrid = ParamGridBuilder() \
+  .addGrid(dt.maxDepth, [5, 10, 15]) \
+  .addGrid(dt.maxBins, [30, 40, 50]) \
+  .build()
+crossval = CrossValidator(estimator = dt,
+                          estimatorParamMaps = paramGrid,
+                          evaluator = BinaryClassificationEvaluator,
+                          numFolds = 3)  
+pipelineCV = Pipeline(stages=indexers + [va, crossval])
+
+# Train the model using the pipeline and preceding BinaryClassificationEvaluator
+cvModel_u = pipelineCV.fit(mini_train_dep)
+
+# COMMAND ----------
+
