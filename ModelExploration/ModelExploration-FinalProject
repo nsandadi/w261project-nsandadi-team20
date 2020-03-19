@@ -229,10 +229,10 @@ display(predictions.select("DEP_DEL15", "prediction", "probability"))
 
 # COMMAND ----------
 
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
-from pyspark.mllib.evaluation import MulticlassMetrics
-
 # Model Evaluation
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
 print("Model Evaluation")
 print("----------------")
 
@@ -261,13 +261,14 @@ f1 = evaluator.evaluate(predictions)
 print("F1: ", f1)
 
 
-# # Create (prediction, label) pairs and generate confusion matrix
-# predictionAndLabel = predictions.select("prediction", "DEP_DEL15").rdd
-# metrics = MulticlassMetrics(predictionAndLabel)
-# print(metrics.confusionMatrix())
+# COMMAND ----------
 
+from pyspark.mllib.evaluation import MulticlassMetrics
 
-
+# Create (prediction, label) pairs and generate confusion matrix
+predictionAndLabel = predictions.select("prediction", "DEP_DEL15").rdd
+metrics = MulticlassMetrics(predictionAndLabel)
+print(metrics.confusionMatrix())
 
 # COMMAND ----------
 
