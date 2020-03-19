@@ -263,6 +263,8 @@ print("F1: ", f1)
 
 # COMMAND ----------
 
+# Confusion Matrix
+
 from pyspark.mllib.evaluation import MulticlassMetrics
 
 # Create (prediction, label) pairs and generate confusion matrix
@@ -272,9 +274,10 @@ print(metrics.confusionMatrix())
 
 # COMMAND ----------
 
+# Experimenting with Various Smoothing Parameters
+
 from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
 
-# Experimenting with Various Smoothing Parameters
 # We can experiment with various smoothing parameters to see which returns the best resultby using ParamGridBuilder and CrossValidator.
 # 6 values are used for the smoothing parameter, this grid will provide 6 parameter settings for CrossValidator to model, evaluate and choose from.
 
