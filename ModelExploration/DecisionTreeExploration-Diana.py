@@ -89,7 +89,9 @@ mini_train, train, val, test = SplitDataset("")
 
 # Extract only columns of interest
 def ExtractColumnsForDepDelayModel(df):
-  return df.select('Dep_Del15', 'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Op_Unique_Carrier', 'Origin', 'Dest', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group')
+  return df.select('Dep_Del15', 'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
+               #    'Op_Unique_Carrier', 'Origin', 'Dest', 
+                   'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group')
 
 mini_train_dep = ExtractColumnsForDepDelayModel(mini_train)
 val_dep = ExtractColumnsForDepDelayModel(val)
@@ -143,18 +145,50 @@ display(mini_train_dep.agg(*(countDistinct(col(c)).alias(c) for c in mini_train_
 
 # COMMAND ----------
 
+display(mini_train_dep.take(1))
+
+# COMMAND ----------
+
 from pyspark.mllib.regression import LabeledPoint
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import StringIndexer
+from pyspark.sql.functions import col
+
+# Prep training data to be in format
+# TODO: FIGURE OUT HOW TO LOAD DATA AS RDD OF LABEL POINTS!
+
+#indexers = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in ['Op_Unique_Carrier', 'Origin', 'Dest']]
+
+assembler = VectorAssembler(inputCols = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
+                              #    'Op_Unique_Carrier', 'Origin', 'Dest', 
+                                  'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 
+                                  'Distance_Group'], 
+                     outputCol = "features")
+transformed = assembler.transform(mini_train_dep)
+
+res = (transformed.select(col("Dep_Del15").alias("label"), col("features"))
+  .rdd
+  .map(lambda row: LabeledPoint(row.label, row.features)))
+
+
+# COMMAND ----------
+
 from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
 from pyspark.mllib.util import MLUtils
 
+
 # Train a DecisionTree model.
-#  Empty categoricalFeaturesInfo indicates all features are continuous.
+# Variables not included in categoricalFeaturesInfo indicates these features are continuous.
 model = DecisionTree.trainClassifier(
-  mini_train, 
+  res, 
   numClasses=2, 
-  categoricalFeaturesInfo={ 4 -> 19, # Op_Unique_Carrier
-                           5 -> 195, # Origin
-                           6 -> 204},# Dest
+  categoricalFeaturesInfo={}, # 4 -> 19, # Op_Unique_Carrier
+                              # 5 -> 195, # Origin
+                              # 6 -> 204},# Dest
   impurity='gini', 
   maxDepth=5, 
-  maxBins=205)
+  maxBins=32)
+
+
+# COMMAND ----------
+
