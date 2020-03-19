@@ -198,3 +198,106 @@ cvModel_u = pipelineCV.fit(mini_train_dep)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Naive Bayes: Navya
+
+# COMMAND ----------
+
+from pyspark.ml.classification import NaiveBayes
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml import Pipeline
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the Naive Bayes model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+assembler = VectorAssembler(inputCols = ['YEAR', 'MONTH', 'DAY_OF_MONTH', 'DAY_OF_WEEK','CRS_DEP_TIME', 'CRS_ARR_TIME', 'CRS_ELAPSED_TIME', 'DISTANCE', 'DISTANCE_GROUP'], outputCol = "features")
+
+# Train a NaiveBayes model
+nb = NaiveBayes(labelCol = "DEP_DEL15", featuresCol = "features", smoothing = 1)
+
+# Chain assembler and nb_model in a pipeline
+pipeline = Pipeline(stages=[assembler, nb])
+
+# Run stages in pipeline and train the model
+nb_model = pipeline.fit(mini_train)
+
+# Make predictions on test data to measure the accuracy of the model on new data
+predictions = nb_model.transform(val)
+
+# Select results to view
+display(predictions.select("DEP_DEL15", "prediction", "probability"))
+
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.mllib.evaluation import MulticlassMetrics
+
+# Model Evaluation
+print("Model Evaluation")
+print("----------------")
+
+# Accuracy
+evaluator = MulticlassClassificationEvaluator(labelCol="DEP_DEL15", predictionCol="prediction",
+                                              metricName="accuracy")
+accuracy = evaluator.evaluate(predictions)
+print("Accuracy: ", accuracy)
+
+# Recall
+evaluator = MulticlassClassificationEvaluator(labelCol="DEP_DEL15", predictionCol="prediction",
+                                              metricName="weightedRecall")
+recall = evaluator.evaluate(predictions)
+print("Recall: ", recall)
+
+# Precision
+evaluator = MulticlassClassificationEvaluator(labelCol="DEP_DEL15", predictionCol="prediction",
+                                              metricName="weightedPrecision")
+precision = evaluator.evaluate(predictions)
+print("Precision: ", precision)
+
+# F1
+evaluator = MulticlassClassificationEvaluator(labelCol="DEP_DEL15", predictionCol="prediction",
+                                              metricName="f1")
+f1 = evaluator.evaluate(predictions)
+print("F1: ", f1)
+
+
+# # Create (prediction, label) pairs and generate confusion matrix
+# predictionAndLabel = predictions.select("prediction", "DEP_DEL15").rdd
+# metrics = MulticlassMetrics(predictionAndLabel)
+# print(metrics.confusionMatrix())
+
+
+
+
+# COMMAND ----------
+
+from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
+
+# Experimenting with Various Smoothing Parameters
+# We can experiment with various smoothing parameters to see which returns the best resultby using ParamGridBuilder and CrossValidator.
+# 6 values are used for the smoothing parameter, this grid will provide 6 parameter settings for CrossValidator to model, evaluate and choose from.
+
+
+# Create ParamGrid and Evaluator for Cross Validation
+paramGrid = ParamGridBuilder().addGrid(nb.smoothing, [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]).build()
+cvEvaluator = MulticlassClassificationEvaluator(metricName="accuracy")
+
+# Run Cross-validation
+cv = CrossValidator(estimator=pipeline, estimatorParamMaps=paramGrid, evaluator=cvEvaluator)
+cvModel = cv.fit(mini_train)
+
+# # Make predictions on testData. cvModel uses the bestModel.
+# cvPredictions = cvModel.transform(val)
+
+# # Select results to view
+# display(cvPredictions.select("DEP_DEL15", "prediction", "probability"))
+
+# # Evaluate bestModel found from Cross Validation
+# evaluator.evaluate(cvPredictions)
+
+# Does smoothing have any effect on this dataset?
+
+# COMMAND ----------
+
+# Click the chart icon to select chart type and set plot options
+display(mini_train.select("DAY_OF_WEEK", "DEP_DEL15"))
