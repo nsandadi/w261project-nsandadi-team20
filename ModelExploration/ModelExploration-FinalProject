@@ -299,5 +299,4 @@ cvModel = cv.fit(mini_train)
 
 # COMMAND ----------
 
-# Click the chart icon to select chart type and set plot options
 display(mini_train.select("DAY_OF_WEEK", "DEP_DEL15"))
