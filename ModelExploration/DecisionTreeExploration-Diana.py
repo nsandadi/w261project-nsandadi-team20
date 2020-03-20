@@ -195,37 +195,44 @@ def printModel(modelString, featureNames):
 
 # Train a DecisionTree model.
 # Empty categoricalFeaturesInfo indicates all features are continuous.
-model = DecisionTree.trainClassifier(train_dep_rdd, numClasses=2,
+model = DecisionTree.trainClassifier(train_dep_rdd,
+                                     numClasses=2,
                                      categoricalFeaturesInfo={},
                                      impurity='gini', 
-                                     maxDepth=15, 
-                                     maxBins=100)
+                                     maxDepth=10, 
+                                     maxBins=32)
 
 printModel(model.toDebugString(), featureNames)
 
 # COMMAND ----------
+
+import numpy as np
 
 # Do prediction on validation set & capture error
 def PredictAndPrintError(model, data, datasetTypeName):
   predictions = model.predict(data.map(lambda x: x.features))
   labelsAndPredictions = data.map(lambda lp: lp.label).zip(predictions)
   
-  accuracy = labelsAndPredictions.filter(
-      lambda lp: lp[0] != lp[1]).count() / float(data.count())
+  # figure out perf (first value is label, second value is prediction)
+  #accuracy = labelsAndPredictions.map(lambda lp: lp[0] == lp[1]).mean()
   
-  print(datasetTypeName + ' Set Accuracy = ' + str(accuracy))
+  tp = labelsAndPredictions.filter(lambda lp: lp[0] == 1.0 and lp[1] == 1.0).count()
+  tn = labelsAndPredictions.filter(lambda lp: lp[0] == 0.0 and lp[1] == 0.0).count()
+  fp = labelsAndPredictions.filter(lambda lp: lp[0] == 0.0 and lp[1] == 1.0).count()
+  fn = labelsAndPredictions.filter(lambda lp: lp[0] == 1.0 and lp[1] == 0.0).count()
   
+  accuracy = (tp + tn) / (tp + tn + fp + fn) if ((tp + tn + fp + fn) != 0) else 0.0
+  precision = tp / float(tp + fp) if ((tp + fp) != 0) else 0.0
+  recall = tp / float(tp + fn) if ((tp + fn) != 0) else 0.0
+  f1 = 2 * ((precision * recall) / float(precision + recall)) if ((precision + recall) != 0) else 0.0
+  
+  res = [datasetTypeName, str(np.round(accuracy, 6)), str(np.round(precision, 6)), str(np.round(recall, 6)), str(np.round(f1, 6))]
+  print("\t".join(res))
+  
+print("Dataset\t\tAccuracy\tPrecision\tRecall\tF1-Score")
 PredictAndPrintError(model, mini_train_dep_rdd, "Mini Training")
 PredictAndPrintError(model, train_dep_rdd, "Training")
 PredictAndPrintError(model, val_dep_rdd, "Validation")
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
