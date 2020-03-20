@@ -87,14 +87,9 @@ mini_train, train, val, test = SplitDataset("")
 
 # COMMAND ----------
 
-# Extract only columns of interest
-def ExtractColumnsForDepDelayModel(df):
-  return df.select('Dep_Del15', 'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
-               #    'Op_Unique_Carrier', 'Origin', 'Dest', 
-                   'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group')
-
-mini_train_dep = ExtractColumnsForDepDelayModel(mini_train)
-val_dep = ExtractColumnsForDepDelayModel(val)
+# MAGIC %md
+# MAGIC 
+# MAGIC #### EDA Space (in Dataframes & SQL!)
 
 # COMMAND ----------
 
@@ -120,9 +115,17 @@ display(mini_train_dep.agg(*(countDistinct(col(c)).alias(c) for c in mini_train_
 
 # COMMAND ----------
 
+display(mini_train_dep.take(10))
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC #### Plan as reading documentation
-# MAGIC - Source: https://spark.apache.org/docs/1.5.2/mllib-decision-tree.html
+# MAGIC 
+# MAGIC #### Prep the Dataset for Decision Tree Training
+# MAGIC ##### Plan as reading documentation
+# MAGIC - Source: 
+# MAGIC      - DataFrames: https://spark.apache.org/docs/1.5.2/mllib-decision-tree.html
+# MAGIC      - Python RDDs: https://spark.apache.org/docs/2.2.0/mllib-decision-tree.html
 # MAGIC - Using classification decision tree
 # MAGIC - want to use entropy impurity measure (or Gini impurity measure, but not covered in async)
 # MAGIC - should try to bin continuous variables (either in advance or tell spark to do so) -- discretizing continuous variables
@@ -145,14 +148,114 @@ display(mini_train_dep.agg(*(countDistinct(col(c)).alias(c) for c in mini_train_
 
 # COMMAND ----------
 
-display(mini_train_dep.take(10))
+from pyspark.mllib.regression import LabeledPoint
+
+# Define outcome & features to use in model development
+outcomeName = ['Dep_Del15']
+featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
+               #    'Op_Unique_Carrier', 'Origin', 'Dest', # need to figure out how to bring in categorical vars
+                   'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+
+# Prep Data to be used to train and do predictions with decision tree
+def PrepDataForDecisionTreeTraining(df, outcome, featureNames):
+  # Extract only columns of interest
+  df = df.select(outcomeVar + featureNames)
+
+  # Convert dataframe to RDD of LabelPoints (for easier training)
+  rdd = df.rdd.map(lambda x: LabeledPoint(x[0], [x[1:]])).cache()
+  
+  return rdd
+  
+train_dep_rdd = PrepDataForDecisionTreeTraining(train, outcomeName, featureNames)
+mini_train_dep_rdd = PrepDataForDecisionTreeTraining(mini_train, outcomeName, featureNames)
+val_dep_rdd = PrepDataForDecisionTreeTraining(val, outcomeName, featureNames)
+test_dep_rdd = PrepDataForDecisionTreeTraining(test, outcomeName, featureNames)
 
 # COMMAND ----------
 
-# Prep datset to be of LabelPoint Rdds
-from pyspark.mllib.regression import LabeledPoint
+# MAGIC %md
+# MAGIC #### Train Decision Tree Model
 
-mini_train_dep.rdd.map(lambda x: LabeledPoint(x[0], [x[1:]])).take(10)
+# COMMAND ----------
+
+# Print out model so it's more human-readable 
+def printModel(modelString, featureNames):
+  lines = modelString.split("\n")
+  
+  for line in lines:
+    # figure out feature name (to not write "feature #" in line)
+    if ("feature" in line):
+      parts = line.split(" ")
+      featureNumIdx = parts.index("(feature") + 1
+      featureNum = int(parts[featureNumIdx])
+      parts[featureNumIdx] = featureNames[featureNum]
+      line = " ".join(parts)
+    
+    print(line)
+
+# Train a DecisionTree model.
+# Empty categoricalFeaturesInfo indicates all features are continuous.
+model = DecisionTree.trainClassifier(train_dep_rdd, numClasses=2,
+                                     categoricalFeaturesInfo={},
+                                     impurity='gini', 
+                                     maxDepth=15, 
+                                     maxBins=100)
+
+printModel(model.toDebugString(), featureNames)
+
+# COMMAND ----------
+
+# Do prediction on validation set & capture error
+def PredictAndPrintError(model, data, datasetTypeName):
+  predictions = model.predict(data.map(lambda x: x.features))
+  labelsAndPredictions = data.map(lambda lp: lp.label).zip(predictions)
+  
+  accuracy = labelsAndPredictions.filter(
+      lambda lp: lp[0] != lp[1]).count() / float(data.count())
+  
+  print(datasetTypeName + ' Set Accuracy = ' + str(accuracy))
+  
+PredictAndPrintError(model, mini_train_dep_rdd, "Mini Training")
+PredictAndPrintError(model, train_dep_rdd, "Training")
+PredictAndPrintError(model, val_dep_rdd, "Validation")
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC 
+# MAGIC ### Before -- trying things out with Dataframes (no good...)
 
 # COMMAND ----------
 
@@ -168,8 +271,7 @@ from pyspark.sql.functions import col
 
 assembler = VectorAssembler(inputCols = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
                               #    'Op_Unique_Carrier', 'Origin', 'Dest', 
-                                  'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 
-                                  'Distance_Group'], 
+                                  'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'], 
                      outputCol = "features")
 transformed = assembler.transform(mini_train_dep)
 
