@@ -145,7 +145,14 @@ display(mini_train_dep.agg(*(countDistinct(col(c)).alias(c) for c in mini_train_
 
 # COMMAND ----------
 
-display(mini_train_dep.take(1))
+display(mini_train_dep.take(10))
+
+# COMMAND ----------
+
+# Prep datset to be of LabelPoint Rdds
+from pyspark.mllib.regression import LabeledPoint
+
+mini_train_dep.rdd.map(lambda x: LabeledPoint(x[0], [x[1:]])).take(10)
 
 # COMMAND ----------
 
