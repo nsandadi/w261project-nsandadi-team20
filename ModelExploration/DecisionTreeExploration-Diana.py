@@ -249,31 +249,31 @@ from pyspark.ml.classification import DecisionTreeClassifier
 
 # Define outcome & features to use in model development
 outcomeName = 'Dep_Del15'
-nfeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
-                 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time',
-                 'Distance', 'Distance_Group']
+nfeatureNames = [
+  # 1        2            3              4              5                6                7               8               9 
+  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
+]
+#                         10             11       12
 cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] # need to figure out how to bring in categorical vars
 
 # Prep data to relevant rows
-mini_train_dep = mini_train.select([outcomeName] + nfeatureNames)
-train_dep = train.select([outcomeName] + nfeatureNames)
-val_dep = val.select([outcomeName] + nfeatureNames)
+mini_train_dep = mini_train.select([outcomeName] + nfeatureNames + cfeatureNames)
+train_dep = train.select([outcomeName] + nfeatureNames + cfeatureNames)
+val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
 
 # Encodes a string column of labels to a column of label indices
-labelIndexer = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in cfeatureNames]
+si = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in cfeatureNames]
 
 # Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
 # We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
-va = VectorAssembler(inputCols = nfeatureNames, outputCol = "features")
-
+va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
 
 # Define dthe decision tree model
-dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=32)
-
+dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=205)
 
 # Chain assembler and model in a pipeline
-#pipeline = Pipeline(stages= labelIndexer + [va, nb])
-pipeline = Pipeline(stages = [va, dt])
+#pipeline = Pipeline(stages= si + [va, nb])
+pipeline = Pipeline(stages = si + [va, dt])
 
 # Run stages in pipeline and train the model
 dt_model = pipeline.fit(mini_train_dep)
@@ -288,11 +288,12 @@ display(dt_model.stages[-1])
 # Model Evaluation
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 
-def EvaluateModelPredictions(model, data, dataName, outcomeName):
+def EvaluateModelPredictions(model, modelDescription, data, dataName, outcomeName):
   # Make predictions on test data to measure the performance of the model
   predictions = model.transform(data)
   
   print("\nModel Evaluation - ", dataName)
+  print(modelDescription)
   print("------------------------------------------")
 
   # Accuracy
@@ -315,10 +316,26 @@ def EvaluateModelPredictions(model, data, dataName, outcomeName):
   f1 = evaluator.evaluate(predictions)
   print("F1:\t\t", f1)
 
-  
-EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
-EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
-EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
+modelDesc = "First model training with numerical features only, training on mini-training"
+EvaluateModelPredictions(dt_model, modelDesc, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, modelDesc, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, modelDesc, val_dep, "validation", outcomeName)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
