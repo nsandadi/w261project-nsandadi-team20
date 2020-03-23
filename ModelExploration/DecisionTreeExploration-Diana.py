@@ -236,19 +236,89 @@ PredictAndPrintError(model, val_dep_rdd, "Validation")
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-
+# MAGIC %md
+# MAGIC 
+# MAGIC ### Running Decision Tree with Pipelines
 
 # COMMAND ----------
 
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.classification import DecisionTreeClassifier
 
+# Define outcome & features to use in model development
+outcomeName = 'Dep_Del15'
+nfeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 
+                 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time',
+                 'Distance', 'Distance_Group']
+cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] # need to figure out how to bring in categorical vars
+
+# Prep data to relevant rows
+mini_train_dep = mini_train.select([outcomeName] + nfeatureNames)
+train_dep = train.select([outcomeName] + nfeatureNames)
+val_dep = val.select([outcomeName] + nfeatureNames)
+
+# Encodes a string column of labels to a column of label indices
+labelIndexer = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in cfeatureNames]
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+va = VectorAssembler(inputCols = nfeatureNames, outputCol = "features")
+
+
+# Define dthe decision tree model
+dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=32)
+
+
+# Chain assembler and model in a pipeline
+#pipeline = Pipeline(stages= labelIndexer + [va, nb])
+pipeline = Pipeline(stages = [va, dt])
+
+# Run stages in pipeline and train the model
+dt_model = pipeline.fit(mini_train_dep)
 
 # COMMAND ----------
 
+# Visualize the decision tree model that was trained
+display(dt_model.stages[-1])
 
+# COMMAND ----------
+
+# Model Evaluation
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+def EvaluateModelPredictions(model, data, dataName, outcomeName):
+  # Make predictions on test data to measure the performance of the model
+  predictions = model.transform(data)
+  
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+
+  
+EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
 
 # COMMAND ----------
 
