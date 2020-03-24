@@ -270,14 +270,18 @@ def printModel2(model, featureNames):
       parts[featureNumIdx - 1] = "" # remove word "feature"
       featuresUsed.add(featureNames[featureNum])
       
+    # Summarize sets of values for easier reading
     if ("in" in parts):
       setIdx = parts.index("in") + 1
       vals = ast.literal_eval(parts[setIdx][:-1])
+      vals = list(vals)
+      numVals = len(vals)
       if (len(vals) > 5):
         newVals = random.sample(vals, 5)
         newVals = [str(int(d)) for d in newVals]
         newVals.append("...")
-        parts[setIdx] = str(newVals) + " (" + str(len(vals)) + " total values)"
+        vals = newVals
+      parts[setIdx] = str(vals) + " (" + str(numVals) + " total values)"
       
     line = " ".join(parts)
     print(line)
@@ -345,6 +349,7 @@ val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
 
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
 si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in cfeatureNames]
 
 # Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
@@ -352,13 +357,14 @@ si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="kee
 va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
 
 # Define dthe decision tree model
-dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=205)
+dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366) 
+# maxDepth=5, maxBins=205 on mini-train
 
 # Chain assembler and model in a pipeline
 pipeline = Pipeline(stages = si + [va, dt])
 
 # Run stages in pipeline and train the model
-dt_model = pipeline.fit(mini_train_dep)
+dt_model = pipeline.fit(train_dep)
 
 # COMMAND ----------
 
@@ -381,7 +387,10 @@ EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
 
 # COMMAND ----------
 
-
+print("Second model training with numerical & categorical features but no good binning, maxdepth=8, training on training\n")
+EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
 
 # COMMAND ----------
 
