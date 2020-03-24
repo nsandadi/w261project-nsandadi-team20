@@ -236,6 +236,10 @@ PredictAndPrintError(model, val_dep_rdd, "Validation")
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC 
 # MAGIC ### Running Decision Tree with Pipelines
@@ -250,10 +254,10 @@ from pyspark.ml.classification import DecisionTreeClassifier
 # Define outcome & features to use in model development
 outcomeName = 'Dep_Del15'
 nfeatureNames = [
-  # 1        2            3              4              5                6                7               8               9 
+  # 0        1            2              3              4                5                6               7               8 
   'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
 ]
-#                         10             11       12
+#                         9              10       11
 cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] # need to figure out how to bring in categorical vars
 
 # Prep data to relevant rows
@@ -280,8 +284,49 @@ dt_model = pipeline.fit(mini_train_dep)
 
 # COMMAND ----------
 
+for i, feat in enumerate(nfeatureNames + cfeatureNames):
+  print(i, " ", feat)
+
+# COMMAND ----------
+
+import ast
+s =  ast.literal_eval("{4.0,5.0,6.0}")
+s
+
+# COMMAND ----------
+
+import ast
+import random
+
 # Visualize the decision tree model that was trained
-display(dt_model.stages[-1])
+def printModel3(model, featureNames):
+  lines = model.toDebugString.split("\n")
+  
+  for line in lines:
+    parts = line.split(" ")
+
+    # Replace "feature #" with feature name
+    if ("feature" in line):
+      featureNumIdx = parts.index("(feature") + 1
+      featureNum = int(parts[featureNumIdx])
+      parts[featureNumIdx] = featureNames[featureNum] # replace feature number with actual feature name
+      parts[featureNumIdx - 1] = "" # remove word "feature"
+      
+    if ("in" in parts):
+      setIdx = parts.index("in") + 1
+      vals = ast.literal_eval(parts[setIdx][:-1])
+      if (len(vals) > 5):
+        vals = random.sample(vals, 5)
+        vals.append("...")
+        parts[setIdx] = str(vals)
+      
+    line = " ".join(parts)
+    print(line)
+
+print(str(nfeatureNames + cfeatureNames) + "\n")
+#print(dt_model.stages[-1].toDebugString)
+printModel3(dt_model.stages[-1], nfeatureNames + cfeatureNames)
+
 
 # COMMAND ----------
 
@@ -323,7 +368,10 @@ EvaluateModelPredictions(dt_model, modelDesc, val_dep, "validation", outcomeName
 
 # COMMAND ----------
 
-
+modelDesc = "Second model training with numerical & categorical features but no good binning, training on mini-training"
+EvaluateModelPredictions(dt_model, modelDesc, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, modelDesc, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, modelDesc, val_dep, "validation", outcomeName)
 
 # COMMAND ----------
 
