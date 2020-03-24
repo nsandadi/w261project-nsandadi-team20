@@ -246,52 +246,8 @@ PredictAndPrintError(model, val_dep_rdd, "Validation")
 
 # COMMAND ----------
 
-from pyspark.ml import Pipeline
-from pyspark.ml.feature import StringIndexer
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.classification import DecisionTreeClassifier
-
-# Define outcome & features to use in model development
-outcomeName = 'Dep_Del15'
-nfeatureNames = [
-  # 0        1            2              3              4                5                6               7               8 
-  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
-]
-#                         9              10       11
-cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] # need to figure out how to bring in categorical vars
-
-# Prep data to relevant rows
-mini_train_dep = mini_train.select([outcomeName] + nfeatureNames + cfeatureNames)
-train_dep = train.select([outcomeName] + nfeatureNames + cfeatureNames)
-val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
-
-# Encodes a string column of labels to a column of label indices
-si = [StringIndexer(inputCol=column, outputCol=column+"_idx") for column in cfeatureNames]
-
-# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
-# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
-va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
-
-# Define dthe decision tree model
-dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=205)
-
-# Chain assembler and model in a pipeline
-#pipeline = Pipeline(stages= si + [va, nb])
-pipeline = Pipeline(stages = si + [va, dt])
-
-# Run stages in pipeline and train the model
-dt_model = pipeline.fit(mini_train_dep)
-
-# COMMAND ----------
-
-for i, feat in enumerate(nfeatureNames + cfeatureNames):
-  print(i, " ", feat)
-
-# COMMAND ----------
-
-import ast
-s =  ast.literal_eval("{4.0,5.0,6.0}")
-s
+# MAGIC %md
+# MAGIC #### Helper Functions (to avoid code clutter)
 
 # COMMAND ----------
 
@@ -299,8 +255,9 @@ import ast
 import random
 
 # Visualize the decision tree model that was trained
-def printModel3(model, featureNames):
+def printModel2(model, featureNames):
   lines = model.toDebugString.split("\n")
+  featuresUsed = set()
   
   for line in lines:
     parts = line.split(" ")
@@ -311,34 +268,33 @@ def printModel3(model, featureNames):
       featureNum = int(parts[featureNumIdx])
       parts[featureNumIdx] = featureNames[featureNum] # replace feature number with actual feature name
       parts[featureNumIdx - 1] = "" # remove word "feature"
+      featuresUsed.add(featureNames[featureNum])
       
     if ("in" in parts):
       setIdx = parts.index("in") + 1
       vals = ast.literal_eval(parts[setIdx][:-1])
       if (len(vals) > 5):
-        vals = random.sample(vals, 5)
-        vals.append("...")
-        parts[setIdx] = str(vals)
+        newVals = random.sample(vals, 5)
+        newVals = [str(int(d)) for d in newVals]
+        newVals.append("...")
+        parts[setIdx] = str(newVals) + " (" + str(len(vals)) + " total values)"
       
     line = " ".join(parts)
     print(line)
-
-print(str(nfeatureNames + cfeatureNames) + "\n")
-#print(dt_model.stages[-1].toDebugString)
-printModel3(dt_model.stages[-1], nfeatureNames + cfeatureNames)
-
+    
+  print("\n", "All Features:  ", featureNames)
+  print("\n", "Features Used: ", featuresUsed)
 
 # COMMAND ----------
 
 # Model Evaluation
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 
-def EvaluateModelPredictions(model, modelDescription, data, dataName, outcomeName):
+def EvaluateModelPredictions(model, data, dataName, outcomeName):
   # Make predictions on test data to measure the performance of the model
   predictions = model.transform(data)
   
   print("\nModel Evaluation - ", dataName)
-  print(modelDescription)
   print("------------------------------------------")
 
   # Accuracy
@@ -361,17 +317,67 @@ def EvaluateModelPredictions(model, modelDescription, data, dataName, outcomeNam
   f1 = evaluator.evaluate(predictions)
   print("F1:\t\t", f1)
 
-modelDesc = "First model training with numerical features only, training on mini-training"
-EvaluateModelPredictions(dt_model, modelDesc, mini_train_dep, "mini-training", outcomeName)
-EvaluateModelPredictions(dt_model, modelDesc, train_dep, "training", outcomeName)
-EvaluateModelPredictions(dt_model, modelDesc, val_dep, "validation", outcomeName)
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Actual Decision Tree Training & Eval
 
 # COMMAND ----------
 
-modelDesc = "Second model training with numerical & categorical features but no good binning, training on mini-training"
-EvaluateModelPredictions(dt_model, modelDesc, mini_train_dep, "mini-training", outcomeName)
-EvaluateModelPredictions(dt_model, modelDesc, train_dep, "training", outcomeName)
-EvaluateModelPredictions(dt_model, modelDesc, val_dep, "validation", outcomeName)
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.classification import DecisionTreeClassifier
+
+# Define outcome & features to use in model development
+outcomeName = 'Dep_Del15'
+nfeatureNames = [
+  # 0        1            2              3              4                5                6               7               8 
+  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
+]
+#                         9              10       11
+cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] # need to figure out how to bring in categorical vars
+
+# Prep data to relevant rows
+mini_train_dep = mini_train.select([outcomeName] + nfeatureNames + cfeatureNames)
+train_dep = train.select([outcomeName] + nfeatureNames + cfeatureNames)
+val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
+
+# Encodes a string column of labels to a column of label indices
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in cfeatureNames]
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
+
+# Define dthe decision tree model
+dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 5, maxBins=205)
+
+# Chain assembler and model in a pipeline
+pipeline = Pipeline(stages = si + [va, dt])
+
+# Run stages in pipeline and train the model
+dt_model = pipeline.fit(mini_train_dep)
+
+# COMMAND ----------
+
+printModel2(dt_model.stages[-1], nfeatureNames + cfeatureNames)
+
+# COMMAND ----------
+
+# Evaluate first model
+print("First model training with numerical features only, training on mini-training\n")
+EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
+
+# COMMAND ----------
+
+print("Second model training with numerical & categorical features but no good binning, training on mini-training\n")
+EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
+EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
+EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
 
 # COMMAND ----------
 
