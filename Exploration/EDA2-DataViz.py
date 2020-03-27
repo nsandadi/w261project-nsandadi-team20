@@ -405,6 +405,32 @@ fig.show()
 
 # COMMAND ----------
 
+# Plot CRS_Elapsed_Time and outcome
+var = "CRS_Elapsed_Time"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var, type='category'),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ##### Group 3 Plots
 
@@ -498,6 +524,24 @@ MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 # Plot distance group and outcome with bar plots of probability on x axis
 var = "Distance_Group"
 MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear')
+
+# COMMAND ----------
+
+# Plot Month and outcome with bar plots of probability on x axis
+var = "Month"
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear')
+
+# COMMAND ----------
+
+# Plot Day_Of_Year and outcome with bar plots of probability on x axis?
+var = "Day_Of_Year"
+# TODO
+
+# COMMAND ----------
+
+# Plot CRS_Elapsed_Time and outcome with bar plots of probability on x axis
+var = "CRS_Elapsed_Time"
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 
 # COMMAND ----------
 
