@@ -133,6 +133,13 @@ display(full_data_dep.agg(*(countDistinct(col(c)).alias(c) for c in full_data_de
 
 # Plot Year and outcome
 var = "Year"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
+display(d)
+
+# COMMAND ----------
+
+# Plot Year and outcome
+var = "Year"
 d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
 
 t1 = go.Bar(
@@ -154,6 +161,13 @@ l = go.Layout(
 )
 fig = go.Figure(data=[t1, t2], layout=l)
 fig.show()
+
+# COMMAND ----------
+
+# Plot Month & outcome
+var = "Month"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
+display(d)
 
 # COMMAND ----------
 
@@ -180,10 +194,6 @@ l = go.Layout(
 )
 fig = go.Figure(data=[t1, t2], layout=l)
 fig.show()
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
@@ -237,6 +247,13 @@ l = go.Layout(
 )
 fig = go.Figure(data=[t1, t2], layout=l)
 fig.show()
+
+# COMMAND ----------
+
+# Plot Day of Week and outcome
+var = "Day_Of_Week"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
+display(d)
 
 # COMMAND ----------
 
@@ -334,7 +351,8 @@ fig.show()
 
 # COMMAND ----------
 
-
+# MAGIC %md
+# MAGIC ##### Group 3 Plots
 
 # COMMAND ----------
 
