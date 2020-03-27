@@ -351,28 +351,153 @@ fig.show()
 
 # COMMAND ----------
 
+# Plot Origin and outcome
+# Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
+var = "Origin"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Plot Destination and outcome
+# Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
+var = "Dest"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ##### Group 3 Plots
 
 # COMMAND ----------
 
+# Plot Carrier and outcome
+# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
+var = "Op_Unique_Carrier"
 
+# Filter out just to rows with delays or no delays
+d_delay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
+d_nodelay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
+
+# Join tables to get probabilities of departure delay for each table
+probs = d_delay.join(d_nodelay, d_delay[var] == d_nodelay[var]) \
+           .select(d_delay[var], (d_delay["count"]).alias("DelayCount"), (d_nodelay["count"]).alias("NoDelayCount"), \
+                   (d_delay["count"] / (d_delay["count"] + d_nodelay["count"])).alias("Prob_" + outcomeName))
+
+# Join back with original data to get 0/1 labeling with probablities of departure delay as attribute of airlines
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count()
+d = d.join(probs, full_data_dep[var] == probs[var]) \
+     .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
+     .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
+d = d.round({'Prob_' + outcomeName: 4})
+
+display(d)
 
 # COMMAND ----------
 
+# Plot Carrier and outcome with bar plots of probability on x axis
+# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
+var = "Op_Unique_Carrier"
 
+def MakeProbBarChart(full_data_dep, outcomeName, var, xtype):
+  # Filter out just to rows with delays or no delays
+  d_delay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
+  d_nodelay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
+
+  # Join tables to get probabilities of departure delay for each table
+  probs = d_delay.join(d_nodelay, d_delay[var] == d_nodelay[var]) \
+             .select(d_delay[var], (d_delay["count"]).alias("DelayCount"), (d_nodelay["count"]).alias("NoDelayCount"), \
+                     (d_delay["count"] / (d_delay["count"] + d_nodelay["count"])).alias("Prob_" + outcomeName))
+
+  # Join back with original data to get 0/1 labeling with probablities of departure delay as attribute of airlines
+  d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count()
+  d = d.join(probs, full_data_dep[var] == probs[var]) \
+       .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
+       .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
+  d = d.round({'Prob_' + outcomeName: 4})
+
+  t1 = go.Bar(
+    x = d[d[outcomeName] == 0.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 0.0]["count"],
+    name=outcomeName + " = " + str(0.0),
+    text=d[d[outcomeName] == 0.0][var]
+  )
+  t2 = go.Bar(
+    x = d[d[outcomeName] == 1.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 1.0]["count"],
+    name=outcomeName + " = " + str(1.0),
+    text=d[d[outcomeName] == 1.0][var]
+  )
+
+  l = go.Layout(
+    barmode='stack', 
+    title="Flight Counts by " + "Prob_" + outcomeName + " & " + outcomeName + " for each " + var,
+    xaxis=dict(title="Prob_" + outcomeName + " (Note: axis type = " + xtype + ")", type=xtype),
+    yaxis=dict(title="Number of Flights")
+  )
+  fig = go.Figure(data=[t1, t2], layout=l)
+  fig.show()
+  
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 
 # COMMAND ----------
 
-
+# Plot Origin airport and outcome with bar plots of probability on x axis
+# Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
+var = "Origin"
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 
 # COMMAND ----------
 
-
+# Plot Destination airport and outcome with bar plots of probability on x axis
+# Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
+var = "Dest"
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 
 # COMMAND ----------
 
-
+# Plot distance group and outcome with bar plots of probability on x axis
+var = "Distance_Group"
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear')
 
 # COMMAND ----------
 
