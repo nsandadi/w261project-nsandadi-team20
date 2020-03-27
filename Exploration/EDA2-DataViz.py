@@ -88,6 +88,9 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import datetime as dt
 
+
+import plotly.io as pio
+
 # COMMAND ----------
 
 from pyspark.sql import functions as f
@@ -118,7 +121,253 @@ display(full_data_dep.agg(*(countDistinct(col(c)).alias(c) for c in full_data_de
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC 
 # MAGIC #### EDA
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Group 1 Plots
+
+# COMMAND ----------
+
+# Plot Year and outcome
+var = "Year"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='stack', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Plot Month and outcome
+var = "Month"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='stack', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# Plot that demonstrates the probability of a departure delay, given the day of year (interaction of month & day of month)
+var = "Day_Of_Year"
+d = full_data_dep.select("Month", "Day_Of_Month", outcomeName) \
+                 .withColumn(var, f.concat(f.col('Month'), f.lit('-'), f.col('Day_Of_Month'))) \
+                 .groupBy(var, "Month", "Day_Of_Month", outcomeName).count() \
+                 .orderBy("Month", "Day_Of_Month") \
+                 .toPandas()
+display(d)
+
+# COMMAND ----------
+
+# Plot Day_Of_Month interacted with Month and outcome
+var = "Day_Of_Year"
+d = full_data_dep.select("Month", "Day_Of_Month", outcomeName) \
+                 .withColumn(var, f.concat(f.col('Month'), f.lit('-'), f.col('Day_Of_Month'))) \
+                 .groupBy(var, "Month", "Day_Of_Month", outcomeName).count() \
+                 .orderBy("Month", "Day_Of_Month") \
+                 .toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var, type='category'),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Plot Day_Of_Month interacted with Month and outcome
+l = go.Layout(
+  barmode='stack', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var, type='category'),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Plot Day of Week and outcome
+var = "Day_Of_Week"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Effectively demonstrates the probability of a departure delay, given the distance group
+var = "Distance_Group"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
+display(d)
+
+# COMMAND ----------
+
+# Plot Distance Group and outcome
+var = "Distance_Group"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+# Effectively demonstrates the probability of a departure delay, given the carrier
+# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
+var = "Op_Unique_Carrier"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+display(d)
+
+# COMMAND ----------
+
+# Plot Carrier and outcome
+# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
+var = "Op_Unique_Carrier"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+
+t1 = go.Bar(
+  x = d[d[outcomeName] == 0.0][var],
+  y = d[d[outcomeName] == 0.0]["count"],
+  name=outcomeName + " = " + str(0.0)
+)
+t2 = go.Bar(
+  x = d[d[outcomeName] == 1.0][var],
+  y = d[d[outcomeName] == 1.0]["count"],
+  name=outcomeName + " = " + str(1.0)
+)
+
+l = go.Layout(
+  barmode='group', 
+  title="Flight Counts by " + var + " & " + outcomeName,
+  xaxis=dict(title=var),
+  yaxis=dict(title="Number of Flights")
+)
+fig = go.Figure(data=[t1, t2], layout=l)
+fig.show()
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Understanding Plotly
 
 # COMMAND ----------
 
@@ -132,6 +381,17 @@ fig = {
 # To display the figure defined by this dict, use the low-level plotly.io.show function
 import plotly.io as pio
 pio.show(fig)
+
+# COMMAND ----------
+
+import plotly.graph_objects as go
+fig = go.Figure(
+    data=[go.Bar(x=[1, 2, 3], y=[1, 3, 2])],
+    layout=go.Layout(
+        title=go.layout.Title(text="A Bar Chart")
+    )
+)
+fig.show()
 
 # COMMAND ----------
 
