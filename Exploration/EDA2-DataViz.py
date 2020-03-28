@@ -230,7 +230,7 @@ t2 = go.Bar(
 )
 
 l = go.Layout(
-  barmode='group', 
+  barmode='stack', 
   title="Flight Counts by " + var + " & " + outcomeName,
   xaxis=dict(title=var, type='category'),
   yaxis=dict(title="Number of Flights")
@@ -505,7 +505,9 @@ def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
   fig = go.Figure(data=[t1, t2], layout=l)
   fig.show()
   
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=4)
+  return d
+  
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
 
 # COMMAND ----------
 
@@ -538,13 +540,13 @@ MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
 # Plot Day_Of_Year and outcome with bar plots of probability on x axis?
 var = "Day_Of_Year"
 d = full_data_dep.withColumn(var, f.concat(f.col('Month'), f.lit('-'), f.col('Day_Of_Month')))
-MakeProbBarChart(d, outcomeName, var, xtype='category', numDecimals=10)
+d = MakeProbBarChart(d, outcomeName, var, xtype='category', numDecimals=10)
 
 # COMMAND ----------
 
 # Plot CRS_Elapsed_Time and outcome with bar plots of probability on x axis
 var = "CRS_Elapsed_Time"
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=10)
 
 # COMMAND ----------
 
