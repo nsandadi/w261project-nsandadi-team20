@@ -99,6 +99,8 @@ from pyspark.sql import SQLContext
 
 sqlContext = SQLContext(sc)
 
+from pyspark.sql.functions import col, countDistinct
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -106,7 +108,8 @@ sqlContext = SQLContext(sc)
 
 # COMMAND ----------
 
-full_data_dep.count()
+print("Expected Num Records:  23903381")
+print("  Actual Num Records: ", full_data_dep.count())
 
 # COMMAND ----------
 
@@ -115,7 +118,6 @@ display(full_data_dep.sample(False, 0.00001))
 # COMMAND ----------
 
 # Get number of distinct values for each column in full training dataset
-from pyspark.sql.functions import col, countDistinct
 display(full_data_dep.agg(*(countDistinct(col(c)).alias(c) for c in full_data_dep.columns)))
 
 # COMMAND ----------
@@ -464,7 +466,7 @@ display(d)
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
 var = "Op_Unique_Carrier"
 
-def MakeProbBarChart(full_data_dep, outcomeName, var, xtype):
+def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
   # Filter out just to rows with delays or no delays
   d_delay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
   d_nodelay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
@@ -479,7 +481,7 @@ def MakeProbBarChart(full_data_dep, outcomeName, var, xtype):
   d = d.join(probs, full_data_dep[var] == probs[var]) \
        .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
        .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
-  d = d.round({'Prob_' + outcomeName: 4})
+  d = d.round({'Prob_' + outcomeName: numDecimals})
 
   t1 = go.Bar(
     x = d[d[outcomeName] == 0.0]["Prob_" + outcomeName],
@@ -503,39 +505,40 @@ def MakeProbBarChart(full_data_dep, outcomeName, var, xtype):
   fig = go.Figure(data=[t1, t2], layout=l)
   fig.show()
   
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
 # Plot Origin airport and outcome with bar plots of probability on x axis
 # Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
 var = "Origin"
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
 # Plot Destination airport and outcome with bar plots of probability on x axis
 # Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
 var = "Dest"
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
 # Plot distance group and outcome with bar plots of probability on x axis
 var = "Distance_Group"
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
 
 # COMMAND ----------
 
 # Plot Month and outcome with bar plots of probability on x axis
 var = "Month"
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear')
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
 
 # COMMAND ----------
 
 # Plot Day_Of_Year and outcome with bar plots of probability on x axis?
 var = "Day_Of_Year"
-# TODO
+d = full_data_dep.withColumn(var, f.concat(f.col('Month'), f.lit('-'), f.col('Day_Of_Month')))
+MakeProbBarChart(d, outcomeName, var, xtype='category', numDecimals=10)
 
 # COMMAND ----------
 
@@ -550,35 +553,6 @@ MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category')
 # COMMAND ----------
 
 
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC #### Understanding Plotly
-
-# COMMAND ----------
-
-fig = {
-    "data": [{"type": "bar",
-              "x": [1, 2, 3],
-              "y": [1, 3, 2]}],
-    "layout": {"title": {"text": "A Bar Chart"}}
-}
-
-# To display the figure defined by this dict, use the low-level plotly.io.show function
-import plotly.io as pio
-pio.show(fig)
-
-# COMMAND ----------
-
-import plotly.graph_objects as go
-fig = go.Figure(
-    data=[go.Bar(x=[1, 2, 3], y=[1, 3, 2])],
-    layout=go.Layout(
-        title=go.layout.Title(text="A Bar Chart")
-    )
-)
-fig.show()
 
 # COMMAND ----------
 
