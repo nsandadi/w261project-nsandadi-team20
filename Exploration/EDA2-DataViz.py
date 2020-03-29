@@ -52,6 +52,11 @@ display(dbutils.fs.ls("dbfs/user/team20"))
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC #### Start Here!
+
+# COMMAND ----------
+
 # Read in data for faster querying
 full_data = spark.read.option("header", "true").parquet(f"dbfs/user/team20/full_training_data_airlines.parquet")
 
@@ -140,29 +145,35 @@ display(d)
 
 # COMMAND ----------
 
+def MakeRegBarChart(full_data_dep, outcomeName, var, orderBy, barmode, xtype):
+  if (orderBy):
+      d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(orderBy).toPandas()
+  else:
+    d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+  t1 = go.Bar(
+    x = d[d[outcomeName] == 0.0][var],
+    y = d[d[outcomeName] == 0.0]["count"],
+    name=outcomeName + " = " + str(0.0)
+  )
+  t2 = go.Bar(
+    x = d[d[outcomeName] == 1.0][var],
+    y = d[d[outcomeName] == 1.0]["count"],
+    name=outcomeName + " = " + str(1.0)
+  )
+
+  l = go.Layout(
+    barmode=barmode, 
+    title="Flight Counts by " + var + " & " + outcomeName,
+    xaxis=dict(title=var, type=xtype),
+    yaxis=dict(title="Number of Flights")
+  )
+  fig = go.Figure(data=[t1, t2], layout=l)
+  fig.show()
+
 # Plot Year and outcome
 var = "Year"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='stack', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', xtype='category')
 
 # COMMAND ----------
 
@@ -175,27 +186,7 @@ display(d)
 
 # Plot Month and outcome
 var = "Month"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='stack', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', xtype='category')
 
 # COMMAND ----------
 
@@ -240,18 +231,6 @@ fig.show()
 
 # COMMAND ----------
 
-# Plot Day_Of_Month interacted with Month and outcome
-l = go.Layout(
-  barmode='stack', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var, type='category'),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
-
-# COMMAND ----------
-
 # Plot Day of Week and outcome
 var = "Day_Of_Week"
 d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
@@ -261,27 +240,7 @@ display(d)
 
 # Plot Day of Week and outcome
 var = "Day_Of_Week"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='group', xtype='category')
 
 # COMMAND ----------
 
@@ -294,27 +253,7 @@ display(d)
 
 # Plot Distance Group and outcome
 var = "Distance_Group"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='group', xtype='category')
 
 # COMMAND ----------
 
@@ -329,107 +268,39 @@ display(d)
 # Plot Carrier and outcome
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
 var = "Op_Unique_Carrier"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy='count', barmode='group', xtype='category')
 
 # COMMAND ----------
 
 # Plot Origin and outcome
 # Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
 var = "Origin"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy='count', barmode='group', xtype='category')
 
 # COMMAND ----------
 
 # Plot Destination and outcome
 # Airport Codes: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes
 var = "Dest"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
-
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
-
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy='count', barmode='group', xtype='category')
 
 # COMMAND ----------
 
 # Plot CRS_Elapsed_Time and outcome
 var = "CRS_Elapsed_Time"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy("count").toPandas()
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', xtype='linear')
 
-t1 = go.Bar(
-  x = d[d[outcomeName] == 0.0][var],
-  y = d[d[outcomeName] == 0.0]["count"],
-  name=outcomeName + " = " + str(0.0)
-)
-t2 = go.Bar(
-  x = d[d[outcomeName] == 1.0][var],
-  y = d[d[outcomeName] == 1.0]["count"],
-  name=outcomeName + " = " + str(1.0)
-)
+# COMMAND ----------
 
-l = go.Layout(
-  barmode='group', 
-  title="Flight Counts by " + var + " & " + outcomeName,
-  xaxis=dict(title=var, type='category'),
-  yaxis=dict(title="Number of Flights")
-)
-fig = go.Figure(data=[t1, t2], layout=l)
-fig.show()
+# Plot CRS_Dep_Time and outcome
+var = "CRS_Dep_Time"
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', xtype='linear')
+
+# COMMAND ----------
+
+# Plot CRS_Arr_Time and outcome
+var = "CRS_Arr_Time"
+MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', xtype='linear')
 
 # COMMAND ----------
 
