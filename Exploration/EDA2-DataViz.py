@@ -92,7 +92,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import datetime as dt
-
+import plotly.express as px
 
 import plotly.io as pio
 
@@ -374,8 +374,6 @@ def BinValues(df, var, splits, labels):
   bucketizer = Bucketizer(splits=splits, inputCol=var, outputCol=var + "_bin")
   df_buck = bucketizer.setHandleInvalid("keep").transform(df)
   
-  #bucketMaps = {0: '12am-2am', 1: '2am-4am', 2: '4am-6am', 3: '6am-8am', 4: '8am-10am', 5: '10am-12pm',
-  #              6: '12pm-2pm', 7: '2pm-4pm', 8: '4pm-6pm', 9: '6pm-8pm', 10: '8pm-10pm', 11: '10pm-12am'}
   bucketMaps = {}
   bucketNum = 0
   for l in labels:
@@ -399,6 +397,15 @@ d = BinValues(d, var, splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1
                         '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
 
 MakeRegBarChart(d, outcomeName, var + "_bin", orderBy=var + "_bin", barmode='group', xtype='category')
+
+# COMMAND ----------
+
+var = 'CRS_Dep_Time'
+d = full_data_dep.select(var, outcomeName)
+d = BinValues(d, var, splits = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400],
+              labels = [str(i) for i in range(0, 24)])
+
+MakeRegBarChart(d, outcomeName, var + "_bin", orderBy=var + "_bin", barmode='stack', xtype='category')
 
 # COMMAND ----------
 
@@ -493,11 +500,158 @@ MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=
 
 # COMMAND ----------
 
-
+# MAGIC %md
+# MAGIC ##### Group 4 Plots
 
 # COMMAND ----------
 
+def PlotBasicBoxPlots(full_data_dep, var, outcomeName):
+  d = full_data_dep.select(var, outcomeName).sample(True, 0.0005, 6).toPandas()
+  fig = px.box(d, y=var, points="all", color=outcomeName, title="Boxplots of " + var + " by " + outcomeName)
+  fig.show()
 
+# COMMAND ----------
+
+var = "Distance"
+PlotBasicBoxPlots(full_data_dep, var, outcomeName)
+
+# COMMAND ----------
+
+def PlotBinnedBoxPlots(full_data_dep, var, binnedVar, outcomeName):
+  d = full_data_dep.select(var, outcomeName, binnedVar).sample(True, 0.0005, 6).toPandas()
+  fig = px.box(d, x=binnedVar, y=var, points="all", color=outcomeName)
+  fig.show()
+
+# COMMAND ----------
+
+var = "Distance"
+binnedVar = var + "_Group"
+PlotBinnedBoxPlots(full_data_dep, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+var = "CRS_Elapsed_Time"
+PlotBasicBoxPlots(full_data_dep, var, outcomeName)
+
+# COMMAND ----------
+
+var = "CRS_Elapsed_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+              labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'])
+
+PlotBinnedBoxPlots(d, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+# Plot CRS_Elapsed_Time and outcome as porbability chart
+var = "CRS_Elapsed_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+              labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'])
+MakeRegBarChart(d, outcomeName, binnedVar, orderBy=binnedVar, barmode='stack', xtype='category')
+
+# COMMAND ----------
+
+MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecimals=4)
+
+# COMMAND ----------
+
+var = "CRS_Dep_Time"
+PlotBasicBoxPlots(full_data_dep, var, outcomeName)
+
+# COMMAND ----------
+
+var = "CRS_Dep_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], 
+              labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+
+PlotBinnedBoxPlots(d, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+MakeRegBarChart(d, outcomeName, binnedVar, orderBy=binnedVar, barmode='stack', xtype='category')
+
+# COMMAND ----------
+
+MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecimals=4)
+
+# COMMAND ----------
+
+var = "CRS_Dep_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 
+                        1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400], 
+              labels = ['12am-1am', '1am-2am', '2am-3am', '3am-4am', '4am-5am', '5am-6am', 
+                        '6am-7am', '7am-8am', '8am-9am', '9am-10am', '10am-11am', '11am-12pm', 
+                        '12pm-1pm', '1pm-2pm', '2pm-3pm', '3pm-4pm', '4pm-5pm', '5pm-6pm', 
+                        '6pm-7pm', '7pm-8pm', '8pm-9pm', '9pm-10pm', '10pm-11pm', '11pm-12am'])
+
+PlotBinnedBoxPlots(d, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+MakeRegBarChart(d, outcomeName, binnedVar, orderBy=binnedVar, barmode='stack', xtype='category')
+
+# COMMAND ----------
+
+MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecimals=4)
+
+# COMMAND ----------
+
+var = "CRS_Arr_Time"
+PlotBasicBoxPlots(full_data_dep, var, outcomeName)
+
+# COMMAND ----------
+
+var = "CRS_Arr_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], 
+              labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+
+PlotBinnedBoxPlots(d, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+MakeRegBarChart(d, outcomeName, binnedVar, orderBy=binnedVar, barmode='stack', xtype='category')
+
+# COMMAND ----------
+
+MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecimals=4)
+
+# COMMAND ----------
+
+var = "CRS_Arr_Time"
+binnedVar = var + "_bin"
+
+d = BinValues(full_data_dep, var, 
+              splits = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 
+                        1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400], 
+              labels = ['12am-1am', '1am-2am', '2am-3am', '3am-4am', '4am-5am', '5am-6am', 
+                        '6am-7am', '7am-8am', '8am-9am', '9am-10am', '10am-11am', '11am-12pm', 
+                        '12pm-1pm', '1pm-2pm', '2pm-3pm', '3pm-4pm', '4pm-5pm', '5pm-6pm', 
+                        '6pm-7pm', '7pm-8pm', '8pm-9pm', '9pm-10pm', '10pm-11pm', '11pm-12am'])
+
+PlotBinnedBoxPlots(d, var, binnedVar, outcomeName)
+
+# COMMAND ----------
+
+MakeRegBarChart(d, outcomeName, binnedVar, orderBy=binnedVar, barmode='stack', xtype='category')
+
+# COMMAND ----------
+
+MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
