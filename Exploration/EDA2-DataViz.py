@@ -134,16 +134,12 @@ display(full_data_dep.agg(*(countDistinct(col(c)).alias(c) for c in full_data_de
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Group 1 Plots
+# MAGIC ##### Helper Functions for EDA
 
 # COMMAND ----------
 
-# Plot Year and outcome
-var = "Year"
-d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
-display(d)
-
-# COMMAND ----------
+# Helper Function for Group 1 graphs plotting distinct values of feature on X and number of flights on Y, categorized
+# by outocme variable
 
 def MakeRegBarChart(full_data_dep, outcomeName, var, orderBy, barmode, xtype):
   if (orderBy):
@@ -170,6 +166,66 @@ def MakeRegBarChart(full_data_dep, outcomeName, var, orderBy, barmode, xtype):
   )
   fig = go.Figure(data=[t1, t2], layout=l)
   fig.show()
+
+# COMMAND ----------
+
+# Helper function for Group 3 graphs that plot the probability of outcome on the x axis, the number of flights on the x axis
+# With entries for each distinct value of the feature as separate bars.
+
+def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
+  # Filter out just to rows with delays or no delays
+  d_delay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
+  d_nodelay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
+
+  # Join tables to get probabilities of departure delay for each table
+  probs = d_delay.join(d_nodelay, d_delay[var] == d_nodelay[var]) \
+             .select(d_delay[var], (d_delay["count"]).alias("DelayCount"), (d_nodelay["count"]).alias("NoDelayCount"), \
+                     (d_delay["count"] / (d_delay["count"] + d_nodelay["count"])).alias("Prob_" + outcomeName))
+
+  # Join back with original data to get 0/1 labeling with probablities of departure delay as attribute of airlines
+  d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count()
+  d = d.join(probs, full_data_dep[var] == probs[var]) \
+       .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
+       .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
+  d = d.round({'Prob_' + outcomeName: numDecimals})
+
+  t1 = go.Bar(
+    x = d[d[outcomeName] == 0.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 0.0]["count"],
+    name=outcomeName + " = " + str(0.0),
+    text=d[d[outcomeName] == 0.0][var]
+  )
+  t2 = go.Bar(
+    x = d[d[outcomeName] == 1.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 1.0]["count"],
+    name=outcomeName + " = " + str(1.0),
+    text=d[d[outcomeName] == 1.0][var]
+  )
+
+  l = go.Layout(
+    barmode='stack', 
+    title="Flight Counts by " + "Prob_" + outcomeName + " & " + outcomeName + " for each " + var,
+    xaxis=dict(title="Prob_" + outcomeName + " (Note: axis type = " + xtype + ")", type=xtype),
+    yaxis=dict(title="Number of Flights")
+  )
+  fig = go.Figure(data=[t1, t2], layout=l)
+  fig.show()
+  
+  return d
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Group 1 Plots
+
+# COMMAND ----------
+
+# Plot Year and outcome
+var = "Year"
+d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(var).toPandas()
+display(d)
+
+# COMMAND ----------
 
 # Plot Year and outcome
 var = "Year"
@@ -305,6 +361,64 @@ MakeRegBarChart(full_data_dep, outcomeName, var, orderBy=var, barmode='stack', x
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ##### Group 2 Plots
+
+# COMMAND ----------
+
+# Make helper code for bucketizing (binning) values
+from pyspark.ml.feature import Bucketizer
+from pyspark.sql.functions import udf
+from pyspark.sql.types import *
+
+def BinValues(df, var, splits, labels):
+  bucketizer = Bucketizer(splits=splits, inputCol=var, outputCol=var + "_bin")
+  df_buck = bucketizer.setHandleInvalid("keep").transform(df)
+  
+  #bucketMaps = {0: '12am-2am', 1: '2am-4am', 2: '4am-6am', 3: '6am-8am', 4: '8am-10am', 5: '10am-12pm',
+  #              6: '12pm-2pm', 7: '2pm-4pm', 8: '4pm-6pm', 9: '6pm-8pm', 10: '8pm-10pm', 11: '10pm-12am'}
+  bucketMaps = {}
+  bucketNum = 0
+  for l in labels:
+    bucketMaps[bucketNum] = l
+    bucketNum = bucketNum + 1
+    
+  def newCols(x):
+    return bucketMaps[x]
+  
+  callnewColsUdf = udf(newCols, StringType())
+    
+  return df_buck.withColumn(var + "_binlabel", callnewColsUdf(f.col(var + "_bin")))
+
+
+# COMMAND ----------
+
+var = 'CRS_Dep_Time'
+d = full_data_dep.select(var, outcomeName)
+d = BinValues(d, var, splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+              labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm',
+                        '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+
+MakeRegBarChart(d, outcomeName, var + "_bin", orderBy=var + "_bin", barmode='group', xtype='category')
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ##### Group 3 Plots
 
 # COMMAND ----------
@@ -335,49 +449,7 @@ display(d)
 
 # Plot Carrier and outcome with bar plots of probability on x axis
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
-var = "Op_Unique_Carrier"
-
-def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
-  # Filter out just to rows with delays or no delays
-  d_delay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
-  d_nodelay = full_data_dep.select(var, outcomeName).filter(col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
-
-  # Join tables to get probabilities of departure delay for each table
-  probs = d_delay.join(d_nodelay, d_delay[var] == d_nodelay[var]) \
-             .select(d_delay[var], (d_delay["count"]).alias("DelayCount"), (d_nodelay["count"]).alias("NoDelayCount"), \
-                     (d_delay["count"] / (d_delay["count"] + d_nodelay["count"])).alias("Prob_" + outcomeName))
-
-  # Join back with original data to get 0/1 labeling with probablities of departure delay as attribute of airlines
-  d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count()
-  d = d.join(probs, full_data_dep[var] == probs[var]) \
-       .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
-       .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
-  d = d.round({'Prob_' + outcomeName: numDecimals})
-
-  t1 = go.Bar(
-    x = d[d[outcomeName] == 0.0]["Prob_" + outcomeName],
-    y = d[d[outcomeName] == 0.0]["count"],
-    name=outcomeName + " = " + str(0.0),
-    text=d[d[outcomeName] == 0.0][var]
-  )
-  t2 = go.Bar(
-    x = d[d[outcomeName] == 1.0]["Prob_" + outcomeName],
-    y = d[d[outcomeName] == 1.0]["count"],
-    name=outcomeName + " = " + str(1.0),
-    text=d[d[outcomeName] == 1.0][var]
-  )
-
-  l = go.Layout(
-    barmode='stack', 
-    title="Flight Counts by " + "Prob_" + outcomeName + " & " + outcomeName + " for each " + var,
-    xaxis=dict(title="Prob_" + outcomeName + " (Note: axis type = " + xtype + ")", type=xtype),
-    yaxis=dict(title="Number of Flights")
-  )
-  fig = go.Figure(data=[t1, t2], layout=l)
-  fig.show()
-  
-  return d
-  
+var = "Op_Unique_Carrier"  
 MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
 
 # COMMAND ----------
