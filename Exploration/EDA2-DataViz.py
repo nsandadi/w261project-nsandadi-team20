@@ -655,3 +655,17 @@ MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecim
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
+# Plot Day_Of_Month interacted with Month and outcome
+var = "Origin_Dest"
+outcomeName = "Dep_Del15"
+d = full_data_dep.select("Origin", "Dest", outcomeName) \
+                 .withColumn(var, f.concat(f.col('Origin'), f.lit('-'), f.col('Dest')))
+
+MakeProbBarChart(d, outcomeName, var, xtype='category', numDecimals=10)
+
+# COMMAND ----------
+
