@@ -415,11 +415,7 @@ printModel(modelResults6[0].stages[-1], n6featureNames + s6featureNames)
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-
+display(train_dep.groupBy(outcomeName).count())
 
 # COMMAND ----------
 
