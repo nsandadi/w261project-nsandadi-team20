@@ -370,6 +370,10 @@ from pyspark.ml.feature import Bucketizer
 from pyspark.sql.functions import udf
 from pyspark.sql.types import *
 
+# Augments the provided dataset for the given variable with binned/bucketized
+# versions of that variable, as defined by splits parameter
+# Column name suffixed with '_bin' will be the bucketized column
+# Column name suffixed with '_binlabel' will be the nicely-named version of the bucketized column
 def BinValues(df, var, splits, labels):
   bucketizer = Bucketizer(splits=splits, inputCol=var, outputCol=var + "_bin")
   df_buck = bucketizer.setHandleInvalid("keep").transform(df)
