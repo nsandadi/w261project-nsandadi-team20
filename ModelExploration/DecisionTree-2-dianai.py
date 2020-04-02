@@ -163,6 +163,8 @@ def EvaluateModelPredictions(model, data, dataName, outcomeName):
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
   f1 = evaluator.evaluate(predictions)
   print("F1:\t\t", f1)
+  
+  return (accuracy, recall, precision, f1)
 
 # COMMAND ----------
 
@@ -193,10 +195,8 @@ test_dep = test.select([outcomeName] + nfeatureNames + cfeatureNames)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Make Decision Tree Pipeline
-# MAGIC Resources: 
-# MAGIC * Documentation on Decision Trees & Pipelines Api from Pyspark ML - https://spark.apache.org/docs/1.5.2/ml-decision-tree.html
-# MAGIC * DataFrames: https://spark.apache.org/docs/1.5.2/mllib-decision-tree.html
+# MAGIC ## Feature Engineering and Application to Dataset
+# MAGIC Includes binning terms & generating interaction terms
 
 # COMMAND ----------
 
@@ -241,9 +241,9 @@ def Bin_CRS_Times(data):
                    labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm',
                              '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
   return BinValues(data, 'CRS_Elapsed_Time', 
-                   splits = [-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+                   splits = [Double.NegativeInfinity, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, Double.PositiveInfinity], 
                    labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', 
-                             '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'])
+                             '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12+ hours'])
 
 bfeatureNames = ['CRS_Dep_Time_binlabel', 'CRS_Arr_Time_binlabel', 'CRS_Elapsed_Time_binlabel']
 mini_train_dep = Bin_CRS_Times(mini_train_dep)
@@ -271,51 +271,147 @@ test_dep = AddInteractions(test_dep, interactions)
 
 # COMMAND ----------
 
-# save updated departure delay data & read back
+# save updated departure delay data
 mini_train_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_mini_train_dep.parquet")
 train_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_train_dep.parquet")
 val_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_val_dep.parquet")
 test_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_test_dep.parquet")
+
+# COMMAND ----------
+
+display(dbutils.fs.ls("dbfs/user/team20"))
+
+# COMMAND ----------
 
 mini_train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_mini_train_dep.parquet")
 train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_train_dep.parquet")
 val_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_val_dep.parquet")
 test_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_test_dep.parquet")
 
+print("Mini_Train - \tActual: " + str(mini_train_dep.count()), "\t\tExpected: 2094")
+print("Train - \tActual: " + str(train_dep.count()), "\tExpected: 20916420")
+print("Val - \t\tActual: " + str(val_dep.count()), "\tExpected: 2986961")
+print("Test - \t\tActual: " + str(test_dep.count()), "\tExpected: 7268232")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Make Decision Tree Pipeline
+# MAGIC Resources: 
+# MAGIC * Documentation on Decision Trees & Pipelines Api from Pyspark ML - https://spark.apache.org/docs/1.5.2/ml-decision-tree.html
+# MAGIC * DataFrames: https://spark.apache.org/docs/1.5.2/mllib-decision-tree.html
+
 # COMMAND ----------
 
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
 # Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
-si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in cfeatureNames]
+def PrepStringIndexer(sfeatureNames):
+  return [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in sfeatureNames]
 
 # Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
 # We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
-va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
+def PrepVectorAssembler(numericalfeatureNames, stringfeatureNames):
+  return VectorAssembler(inputCols = numericalfeatureNames + [f + "_idx" for f in stringfeatureNames], outputCol = "features")
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
+def TrainAndEvaluate(trainingData, varStages, outcomeName, maxDepth, maxBins):
+  # Train Model
+  dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
+  pipeline = Pipeline(stages = varStages + [dt])
+  dt_model = pipeline.fit(trainingData)
+  
+  # Evaluate Model
+  mini_train_res = EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
+  train_res = EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
+  val_res = EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
+  
+  return (dt_model, mini_train_res, train_res, val_res)
 
 # COMMAND ----------
 
+# Model 1: Use all prepared variables on mini_training
+si1 = PrepStringIndex(cfeatureNames + bfeatureNames + ifeatureNames)
+va1 = PrepVectorAssembler(nfeatureNames, cfeatureNames + bfeatureNames + ifeatureNames)
+modelResults1 = TrainAndEvaluate(mini_train_dep, si1 + [va1], outcomeName, maxDepth=5, maxBins=1423)
+display(modelResults1[0].stages[-1])
 
+# COMMAND ----------
+
+modelResults1[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults1_dtmodel.txt")
+
+# COMMAND ----------
+
+#display(modelResults1[0].stages[-1])
+printModel(modelResults1[0].stages[-1], nfeatureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+# Model 2: Use all prepared variables on training (no features = baseline :P)
+si2 = PrepStringIndexer(cfeatureNames + bfeatureNames + ifeatureNames)
+va2 = PrepVectorAssembler(nfeatureNames, cfeatureNames + bfeatureNames + ifeatureNames)
+modelResults2 = TrainAndEvaluate(train_dep, si2 + [va2], outcomeName, maxDepth=5, maxBins=6647)
+printModel(modelResults2[0].stages[-1], nfeatureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+modelResults2[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults2_dtmodel.txt")
+
+# COMMAND ----------
+
+# Model 3: Use all prepared variables on training, but with greather depth (8)
+si3 = PrepStringIndexer(cfeatureNames + bfeatureNames + ifeatureNames)
+va3 = PrepVectorAssembler(nfeatureNames, cfeatureNames + bfeatureNames + ifeatureNames)
+modelResults3 = TrainAndEvaluate(train_dep, si3 + [va3], outcomeName, maxDepth=8, maxBins=6647)
+printModel(modelResults3[0].stages[-1], nfeatureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+modelResults3[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults3_dtmodel.txt")
+
+# COMMAND ----------
+
+# Model 4: Use all prepared variables on training, removing variables that have been binned already
+                  # 0        1            2              3              4 
+n4featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+si4 = PrepStringIndexer(cfeatureNames + bfeatureNames + ifeatureNames)
+va4 = PrepVectorAssembler(n4featureNames, cfeatureNames + bfeatureNames + ifeatureNames)
+modelResults4 = TrainAndEvaluate(train_dep, si4 + [va4], outcomeName, maxDepth=8, maxBins=6647)
+printModel(modelResults4[0].stages[-1], n4featureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+modelResults4[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults4_dtmodel.txt")
+
+# COMMAND ----------
+
+# Model 5: Use all variables, but treat binned variables as numerical instead of categorical (to give order)
+b5featureNames = [f[0:-5] for f in bfeatureNames]
+n5featureNames = nfeatureNames + b5featureNames
+s5featureNames = cfeatureNames + ifeatureNames
+
+si5 = PrepStringIndexer(s5featureNames)
+va5 = PrepVectorAssembler(n5featureNames, s5featureNames)
+modelResults5 = TrainAndEvaluate(train_dep, si5 + [va5], outcomeName, maxDepth=8, maxBins=6647)
+printModel(modelResults5[0].stages[-1], n5featureNames + s5featureNames)
+
+# COMMAND ----------
+
+modelResults5[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults5_dtmodel.txt")
+
+# COMMAND ----------
+
+# Model 6: Same mode as in 4, except using binned variable as numerical instead of categorical
+b6featureNames = [f[0:-5] for f in bfeatureNames]
+n6featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] + b6featureNames
+s6featureNames = cfeatureNames + ifeatureNames
+
+si6 = PrepStringIndexer(s6featureNames)
+va6 = PrepVectorAssembler(n6featureNames, s6featureNames)
+modelResults6 = TrainAndEvaluate(train_dep, si6 + [va6], outcomeName, maxDepth=8, maxBins=6647)
+printModel(modelResults6[0].stages[-1], n6featureNames + s6featureNames)
 
 # COMMAND ----------
 
@@ -339,9 +435,9 @@ bi_crs_time_labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '
                       '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am']
   
 # CRS_Elapsed_Time
-bi_crs_dep_time = Bucketizer(splits=[-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+bi_crs_dep_time = Bucketizer(splits=[Double.NegativeInfinity, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, Double.PositiveInfinity], 
                              inputCol='CRS_Elapsed_Time', outputCol='CRS_Elapsed_Time_bin', handleInvalid="keep")
-bi_crs_elapsed_labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours']
+bi_crs_elapsed_labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12+ hours']
 
 # Make a set of bucketizers
 bi = [bi_crs_dep_time, bi_crs_arr_time, bi_crs_dep_time]
