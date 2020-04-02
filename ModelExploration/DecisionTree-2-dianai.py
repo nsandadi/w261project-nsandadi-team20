@@ -90,32 +90,6 @@ print("Test - \t\tActual: " + str(test.count()), "\tExpected: 7268232")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Prepare Initial Specification for Departure Delay Model
-
-# COMMAND ----------
-
-# Outcome Variable
-outcomeName = 'Dep_Del30'
-
-# Numerical features
-nfeatureNames = [
-  # 0        1            2              3              4                5                6               7               8 
-  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
-]
-
-# Categorical features
-#                         9              10       11
-cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
-
-# Filter full data to just relevant columns
-mini_train_dep = mini_train.select([outcomeName] + nfeatureNames + cfeatureNames)
-train_dep = train.select([outcomeName] + nfeatureNames + cfeatureNames)
-val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
-test_dep = test.select([outcomeName] + nfeatureNames + cfeatureNames)
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## Modeling Helper Functions
 
 # COMMAND ----------
@@ -193,6 +167,32 @@ def EvaluateModelPredictions(model, data, dataName, outcomeName):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Prepare Initial Specification for Departure Delay Model
+
+# COMMAND ----------
+
+# Outcome Variable
+outcomeName = 'Dep_Del30'
+
+# Numerical features
+nfeatureNames = [
+  # 0        1            2              3              4                5                6               7               8 
+  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
+]
+
+# Categorical features
+#                         9              10       11
+cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+
+# Filter full data to just relevant columns
+mini_train_dep = mini_train.select([outcomeName] + nfeatureNames + cfeatureNames)
+train_dep = train.select([outcomeName] + nfeatureNames + cfeatureNames)
+val_dep = val.select([outcomeName] + nfeatureNames + cfeatureNames)
+test_dep = test.select([outcomeName] + nfeatureNames + cfeatureNames)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Make Decision Tree Pipeline
 # MAGIC Resources: 
 # MAGIC * Documentation on Decision Trees & Pipelines Api from Pyspark ML - https://spark.apache.org/docs/1.5.2/ml-decision-tree.html
@@ -200,3 +200,148 @@ def EvaluateModelPredictions(model, data, dataName, outcomeName):
 
 # COMMAND ----------
 
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, Bucketizer, VectorAssembler
+from pyspark.ml.classification import DecisionTreeClassifier
+
+from pyspark.sql.functions import udf
+from pyspark.sql.types import *
+from pyspark.sql import functions as f
+
+# COMMAND ----------
+
+# Augments the provided dataset for the given variable with binned/bucketized
+# versions of that variable, as defined by splits parameter
+# Column name suffixed with '_bin' will be the bucketized column
+# Column name suffixed with '_binlabel' will be the nicely-named version of the bucketized column
+def BinValues(df, var, splits, labels):
+  bucketizer = Bucketizer(splits=splits, inputCol=var, outputCol=var + "_bin")
+  df_buck = bucketizer.setHandleInvalid("keep").transform(df)
+  
+  bucketMaps = {}
+  bucketNum = 0
+  for l in labels:
+    bucketMaps[bucketNum] = l
+    bucketNum = bucketNum + 1
+    
+  def newCols(x):
+    return bucketMaps[x]
+  
+  callnewColsUdf = udf(newCols, StringType())
+    
+  return df_buck.withColumn(var + "_binlabel", callnewColsUdf(f.col(var + "_bin")))
+
+def Bin_CRS_Times(data):
+  data = BinValues(data, 'CRS_Dep_Time', 
+                   splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+                   labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm',
+                             '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+  data = BinValues(data, 'CRS_Arr_Time', 
+                   splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+                   labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm',
+                             '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+  return BinValues(data, 'CRS_Elapsed_Time', 
+                   splits = [-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+                   labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', 
+                             '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'])
+
+bfeatureNames = ['CRS_Dep_Time_binlabel', 'CRS_Arr_Time_binlabel', 'CRS_Elapsed_Time_binlabel']
+mini_train_dep = Bin_CRS_Times(mini_train_dep)
+train_dep = Bin_CRS_Times(train_dep)
+val_dep = Bin_CRS_Times(val_dep)
+test_dep = Bin_CRS_Times(test_dep)
+
+# COMMAND ----------
+
+def AddInteractions(data, varPairsAndNames):
+  for (var1_prefix, var1, var2, newName) in varPairsAndNames:
+    data = data.withColumn(newName, f.concat(f.lit(var1_prefix), f.col(var1), f.lit('-'), f.col(var2)))
+  return data
+
+# Make interaction variables: Day_of_Year, OriginxDest
+interactions = [('', 'Month', 'Day_Of_Month', 'Day_Of_Year'), 
+                ('', 'Origin', 'Dest', 'Origin-Dest'),
+                ('Day_', 'Day_Of_Week', 'CRS_Dep_Time_binlabel', 'Dep_Time_Of_Week'),
+                ('Day_', 'Day_Of_Week', 'CRS_Arr_Time_binlabel', 'Arr_Time_Of_Week')]
+ifeatureNames = [i[3] for i in interactions]
+mini_train_dep = AddInteractions(mini_train_dep, interactions)
+train_dep = AddInteractions(train_dep, interactions)
+val_dep = AddInteractions(val_dep, interactions)
+test_dep = AddInteractions(test_dep, interactions)
+
+# COMMAND ----------
+
+# save updated departure delay data & read back
+mini_train_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_mini_train_dep.parquet")
+train_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_train_dep.parquet")
+val_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_val_dep.parquet")
+test_dep.write.mode('overwrite').format("parquet").save("dbfs/user/team20/airlines_test_dep.parquet")
+
+mini_train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_mini_train_dep.parquet")
+train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_train_dep.parquet")
+val_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_val_dep.parquet")
+test_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_test_dep.parquet")
+
+# COMMAND ----------
+
+# Encodes a string column of labels to a column of label indices
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
+si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in cfeatureNames]
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+va = VectorAssembler(inputCols = nfeatureNames + [cat + "_idx" for cat in cfeatureNames], outputCol = "features")
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# bucketize variables: CRS_Dep_Time, CRS_Arr_Time, CRS_Elapsed_Time
+# Use "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+
+# CRS_Dep_Time & CRS_Arr_Time
+bi_crs_dep_time = Bucketizer(splits=[0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], 
+                             inputCol='CRS_Dep_Time', outputCol='CRS_Dep_Time_bin', handleInvalid="keep")
+bi_crs_arr_time = Bucketizer(splits=[0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], 
+                             inputCol='CRS_Arr_Time', outputCol='CRS_Arr_Time_bin', handleInvalid="keep")
+bi_crs_time_labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm',
+                      '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am']
+  
+# CRS_Elapsed_Time
+bi_crs_dep_time = Bucketizer(splits=[-100, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], 
+                             inputCol='CRS_Elapsed_Time', outputCol='CRS_Elapsed_Time_bin', handleInvalid="keep")
+bi_crs_elapsed_labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours']
+
+# Make a set of bucketizers
+bi = [bi_crs_dep_time, bi_crs_arr_time, bi_crs_dep_time]
