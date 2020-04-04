@@ -283,6 +283,7 @@ display(dbutils.fs.ls("dbfs/user/team20"))
 
 # COMMAND ----------
 
+# Read prepared dataset
 mini_train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_mini_train_dep.parquet")
 train_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_train_dep.parquet")
 val_dep = spark.read.option("header", "true").parquet(f"dbfs/user/team20/airlines_val_dep.parquet")
@@ -292,6 +293,25 @@ print("Mini_Train - \tActual: " + str(mini_train_dep.count()), "\t\tExpected: 20
 print("Train - \tActual: " + str(train_dep.count()), "\tExpected: 20916420")
 print("Val - \t\tActual: " + str(val_dep.count()), "\tExpected: 2986961")
 print("Test - \t\tActual: " + str(test_dep.count()), "\tExpected: 7268232")
+
+# COMMAND ----------
+
+# Outcome Variable
+outcomeName = 'Dep_Del30'
+
+# Numerical features
+nfeatureNames = [
+  'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
+]
+
+# Categorical features
+cfeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+bfeatureNames = ['CRS_Dep_Time_binlabel', 'CRS_Arr_Time_binlabel', 'CRS_Elapsed_Time_binlabel']
+interactions = [('', 'Month', 'Day_Of_Month', 'Day_Of_Year'), 
+                ('', 'Origin', 'Dest', 'Origin-Dest'),
+                ('Day_', 'Day_Of_Week', 'CRS_Dep_Time_binlabel', 'Dep_Time_Of_Week'),
+                ('Day_', 'Day_Of_Week', 'CRS_Arr_Time_binlabel', 'Arr_Time_Of_Week')]
+ifeatureNames = [i[3] for i in interactions]
 
 # COMMAND ----------
 
@@ -317,18 +337,23 @@ def PrepVectorAssembler(numericalfeatureNames, stringfeatureNames):
 
 # COMMAND ----------
 
-def TrainAndEvaluate(trainingData, varStages, outcomeName, maxDepth, maxBins):
+def TrainAndEvaluate(trainingData, varStages, outcomeName, maxDepth, maxBins, evalTrainingData = False):
   # Train Model
   dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
   pipeline = Pipeline(stages = varStages + [dt])
   dt_model = pipeline.fit(trainingData)
   
   # Evaluate Model
+  if (evalTrainingData):
+    training_data_res = EvaluateModelPredictions(dt_model, trainingData, "training data", outcomeName)
   mini_train_res = EvaluateModelPredictions(dt_model, mini_train_dep, "mini-training", outcomeName)
   train_res = EvaluateModelPredictions(dt_model, train_dep, "training", outcomeName)
   val_res = EvaluateModelPredictions(dt_model, val_dep, "validation", outcomeName)
   
-  return (dt_model, mini_train_res, train_res, val_res)
+  if (evalTrainingData):
+    return (dt_model, training_data_res, mini_train_res, train_res, val_res)
+  else:
+    return (dt_model, mini_train_res, train_res, val_res)
 
 # COMMAND ----------
 
@@ -415,7 +440,101 @@ printModel(modelResults6[0].stages[-1], n6featureNames + s6featureNames)
 
 # COMMAND ----------
 
+modelResults6[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults6_dtmodel.txt")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ## Balance Majority & Minority Classes
+
+# COMMAND ----------
+
 display(train_dep.groupBy(outcomeName).count())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Because when the departure delay threshold is 30, about 90% of the data is no delay and 10% is delay, we'll need to balance the dataset by splitting it into subsets of 20%, where half is the 10% comprising the minority class and the other half is 10% from the majority class. 
+
+# COMMAND ----------
+
+def SplitAndStackUnbalancedDataset(data, outcomeName, min_label = 1, maj_label = 0, seed=6):
+  # Split dataset into majority & minority class
+  data_min_class = data.filter(data[outcomeName] == min_label)
+  data_maj_class = data.filter(data[outcomeName] == maj_label)
+  
+  # Split the majority class to chunks about the same size as the minority class
+  min_count = train_dep_min_class.count()
+  maj_count = train_dep_maj_class.count()
+  num_datasets = round(maj_count / min_count)
+  splitWeights = [1/num_datasets for i in range(num_datasets)]
+  maj_class_splits = data_maj_class.randomSplit(weights=splitWeights, seed=seed)
+  
+  # Stack minority class with each majority class split individually
+  datasets = []
+  for maj_class in maj_class_splits:
+    datasets.append(maj_class.union(data_min_class))
+  return datasets
+
+# COMMAND ----------
+
+mini_train_dep_stacks = SplitAndStackUnbalancedDataset(mini_train_dep, outcomeName, 1, 0, 6)
+for stack in mini_train_dep_stacks:
+  print(stack.count())
+
+# COMMAND ----------
+
+# Split & Stack training dataset
+train_dep_stacks = SplitAndStackUnbalancedDataset(train_dep, outcomeName, 1, 0, 6)
+display(train_dep_stacks[0].groupBy(outcomeName).count())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Training on subset of train with stacking
+
+# COMMAND ----------
+
+# Retrain Model 2 as Model 7: Use all prepared variables on training, but only first stack
+si7 = PrepStringIndexer(cfeatureNames + bfeatureNames + ifeatureNames)
+va7 = PrepVectorAssembler(nfeatureNames, cfeatureNames + bfeatureNames + ifeatureNames)
+modelResults7 = TrainAndEvaluate(train_dep_stacks[0], si7 + [va7], outcomeName, maxDepth=5, maxBins=6647, evalTrainingData=True)
+printModel(modelResults7[0].stages[-1], nfeatureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+modelResults7[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults7_dtmodel.txt")
+
+# COMMAND ----------
+
+# Try saving first split to cluster for faster retrieval?
+train_dep_stacks[0].write.mode('overwrite').format("parquet").save("dbfs/user/team20/train_dep_stacks/stack0.parquet")
+train_dep_stacks[0] = spark.read.option("header", "true").parquet(f"dbfs/user/team20/train_dep_stacks/stack0.parquet")
+
+# COMMAND ----------
+
+# Retried Model 6: Same model 6, exception only using the first stack of data
+b8featureNames = [f[0:-5] for f in bfeatureNames]
+n8featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] + b8featureNames
+s8featureNames = cfeatureNames + ifeatureNames
+
+si8 = PrepStringIndexer(s8featureNames)
+va8 = PrepVectorAssembler(n8featureNames, s8featureNames)
+modelResults8 = TrainAndEvaluate(train_dep_stacks[0], si8 + [va8], outcomeName, maxDepth=8, maxBins=6647, evalTrainingData=True)
+printModel(modelResults8[0].stages[-1], n8featureNames + s8featureNames)
+
+# COMMAND ----------
+
+modelResults8[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults8_dtmodel.txt")
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
