@@ -203,21 +203,7 @@ def euclidean_distance(row1, row2):
 	for i in range(len(row1)-1):
 		distance += (row1[i] - row2[i])**2
 	return sqrt(distance)
-  
-  
-# Locate the most similar neighbors
-def get_neighbors(train, test_row, num_neighbors):
-	distances = list()
-	for train_row in train:
-		dist = euclidean_distance(test_row, train_row)
-		distances.append((train_row, dist))
-	distances.sort(key=lambda tup: tup[1])
-	neighbors = list()
-	for i in range(num_neighbors):
-		neighbors.append(distances[i+1][0])
-	return neighbors
 
-  
 # Generate synthetic records
 def synthetic(list1, list2):
     synthetic_records = []
@@ -238,31 +224,35 @@ def SmoteSampling(vectorized, k = 5, minorityClass = 1, majorityClass = 0):
     # Convert features dataframe into a list
     feature_list_rdd = featureVect.rdd.map(lambda x: list(x[0]))
     
-    # Broadcast
+    # Broadcast features
     sc = spark.sparkContext
-    feat_broadcast = sc.broadcast(feature_list_rdd)
+    feat_broadcast = sc.broadcast(feature_list_rdd) 
     
-    # 
+    # Generate the Augmented Dataset with k synthetic data points for a 
+    # given feature entry in the original dataset
+    # Emit the original dataset entries and the synthetic dataset entries
+    def generateAugmentedDataset(feature, allPossibleNeighbors, k):
+      # Get all nearest neighbors with euclidean distances
+      nearestNeighbors = allPossibleNeighbors.map(lambda n: (euclidean_distance(feature, n), n)) \
+                                             .takeOrdered(k+1, key=lambda x: x[0])
+      
+      # For each neighbor, compute the difference, & generate the synthetic data point
+      syntheticPoints = nearestNeighbors.map(lambda n: synthetic(feature, n)).collect()
+      
+      # Emit synthetic data points & original data points
+      for i in range(1, len(syntheticPoints)):
+        yield(syntheticPoints[i])
+      yield(feature)
     
-    # Empty list to add synthetic data
-     newRecords = []
-    
-    # For each existing feature, create new features with k nearest neighbors
-    for feature in feature_list:
-      neighbors = get_neighbors(feature_list, feature, k)
-      for neigh in neighbors:
-          newRec = synthetic(feature, neigh)
-          newRecords.append(newRec)
+    # For each feature example, get the k nearest neighbors 
+    # of the feature & generate a synthetic datapoint
+    augmentedData = feature_list_rdd.flatMap(lambda x: generateAugmentedDataset(x, feat_broadcast.value, k))
         
     # Convert the synthetic data into a dataframe
-    newData_rdd = sc.parallelize(newRecords)
-    newData_rdd = newData_rdd.map(lambda x: Row(features = DenseVector(x), label = 1))
-    new_data_df = newData_rdd.toDF()
-
-    # Adding the synthetic data to existing data in minority group
-    new_data_minor = dataInput_min.unionAll(new_data_df)
+    augmentedData = augmentedData.map(lambda x: Row(features = DenseVector(x), label = 1))
+    augmentedData_DF = augmentedData.toDF()
     
-    return dataInput_maj.unionAll(new_data_minor)
+    return dataInput_maj.unionAll(augmentedData_DF)
 
 
 # Target Variable
