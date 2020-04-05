@@ -22,6 +22,47 @@
 
 # MAGIC %md
 # MAGIC ## II. EDA & Discussion of Challenges
+# MAGIC 
+# MAGIC ### Dataset Introduction
+# MAGIC The Bureau of Transporation Statistics provides us with a wide variety of features relating to each flight in the *Airline Delays* dataset, ranging from features about the scheduled flight such as the planned departure, arrival, and elapsed times, the planned distance, the carrier and airport information, information regarding the causes of certain delays for the entire flight, as well as the amounts of delay (for both flight departure and arrival), among many other features. 
+# MAGIC 
+# MAGIC Given that for this analysis, we will be concentrating on predicting and identify the likely causes of departure delays before any such delay happens, we will primarily concentrate our EDA and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
+# MAGIC 
+# MAGIC * **Time of year** (e.g. `Year`, `Month`, `Day_Of_Month`, `Day_Of_Week`)
+# MAGIC * **Airline Carrier** (e.g. `Op_Unique_Carrier`)
+# MAGIC * **Origin & Destination Airports** (e.g. `Origin`, `Dest`)
+# MAGIC * **Scheduled Departure & Arrival Times** (e.g. `CRS_Dep_Time`, `CRS_Arr_Time`)
+# MAGIC * **Planned Elapsed Times & Distances** (e.g. `CRS_Elapsed_Time`, `Distance`, `Distance_Group`)
+# MAGIC 
+# MAGIC Additionally, we will use the variable `Dep_Delay` to define our outcome variable for "significiant" departure delays (i.e. delays of 30 minutes or more). Finally, we will focus our analysis to the subset of flights that are not diverted, are not cancelled and have non-null values for departure delays to ensure that we can accurately predict departure delays for flights. this will still leave us with a significant number of records to work with for the purpose of training and model development. Below are a few example flights taken from the *Airline Delays* dataset that we will use for our analysis.
+
+# COMMAND ----------
+
+# Read in original dataset
+airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
+print("Number of records in original dataset:", airlines.count())
+
+# Filter to datset with entries where diverted != 1, cancelled != 1, and dep_delay != Null
+airlines = airlines.where('DIVERTED != 1') \
+                   .where('CANCELLED != 1') \
+                   .filter(airlines['DEP_DEL15'].isNotNull()) 
+
+print("Number of records in reduced dataset: ", airlines.count())
+
+# COMMAND ----------
+
+# Print examples of flights
+display(airlines.take(6))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirty of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for future flights. 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Notes for II. EDA & Discussion of Challenges
 # MAGIC - 2-3 EDA Tasks to help make decisions on how we implement the algorithm to be scalable
 # MAGIC     - Binning could be a way to scale decision tree algorithms (when defining splits, e.g. CRS_Dep_Time)
 # MAGIC     - More customized binning for the origin-destination to fit some custom criterion (to make new features)
@@ -36,46 +77,8 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## II. EDA & Discussion of Challenges
-# MAGIC 
-# MAGIC ### Dataset Introduction
-# MAGIC The Bureau of Transporation Statistics provides us with a wide variety of features relating to each flight, ranging from features about the scheduled flight such as the planned departure, arrival, and elapsed times, the planned distance, the carrier and airport information, as well as information regarding the causes of certain delays for the entire flight, as well as the amounts of delay (for both flight departure and arrival), among many other features. 
-# MAGIC 
-# MAGIC Given that for this analysis, we will be concentrating on predicting and identify the likely causes of departure delays before any such delay happens, we will primarily concentrate our EDA and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
-# MAGIC 
-# MAGIC * **Time of year** (e.g. `Year`, `Month`, `Day_Of_Month`, `Day_Of_Week`)
-# MAGIC * **Airline Carrier** (e.g. `Op_Unique_Carrier`)
-# MAGIC * **Origin & Destination Airports** (e.g. `Origin`, `Dest`)
-# MAGIC * **Scheduled Departure & Arrival Times** (e.g. `CRS_Dep_Time`, `CRS_Arr_Time`)
-# MAGIC * **Planned Elapsed Times & Distances** (e.g. `CRS_Elapsed_Time`, `Distance`, `Distance_Group`)
-# MAGIC 
-# MAGIC Additionally, we will use the variable `Dep_Delay` to define our outcome variable for "significiant" departure delays (i.e. delays of 30 minutes or more). Finally , we will focus our analysis to the subset of flights that are not diverted, are not cancelled and have departure delays defined to ensure that we can accurately predict departure delays for flights. Below are a few example flights taken from the *Airline Delays* dataset that we will use for our analysis.
-
-# COMMAND ----------
-
-# Read in original dataset
-airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
-
-# Filter to datset with entries where diverted != 1, cancelled != 1, and dep_delay != Null
-airlines = airlines.where('DIVERTED != 1') \
-                   .where('CANCELLED != 1') \
-                   .filter(airlines['DEP_DEL15'].isNotNull()) \
-                   .filter(airlines['ARR_DEL15'].isNotNull())
-
-print("Number of records in full dataset:", airlines.count())
-
-# Print examples of flights
-display(airlines.take(6))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirty of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for flights that will occur in the future. 
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Mention Algorithms we'll consider in part IV
+# MAGIC ### Prospective Models for the Departure Delay Classification Task
+# MAGIC To motivate our EDA in this section for scalability investigation, we will keep in mind the following models, which we will explore in more detail in section IV:
 # MAGIC * Logistic Regression
 # MAGIC * Decision Trees
 # MAGIC * Naive Bayes
