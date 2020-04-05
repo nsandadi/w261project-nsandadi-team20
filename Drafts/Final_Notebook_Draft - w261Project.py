@@ -538,7 +538,11 @@ print(" - Origin Activity Feature: \t", orgFeatureNames)
 
 # COMMAND ----------
 
-#re-read augmented data in parquet & avro formats
+##################
+## START HERE!! ##
+##################
+
+# Re-read augmented data in parquet & avro formats
 def ReadDataInParquetAndAvro(dataName):
   data_parquet = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
   data_avro = spark.read.format("avro").load(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
@@ -549,12 +553,14 @@ train, train_avro = ReadDataInParquetAndAvro('augmented_train')
 val, val_avro = ReadDataInParquetAndAvro('augmented_val')
 test, test_avro = ReadDataInParquetAndAvro('augmented_test')
 
+# Redefine feature names in one place
 numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
 catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
 intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
 holFeatureNames = ['Holiday']
 orgFeatureNames = ['Origin_Activity']
+outcomeName = 'Dep_Del30'
 
 # COMMAND ----------
 
@@ -691,20 +697,8 @@ va_base = PrepVectorAssembler(numericalFeatureNames = features_base[0], stringFe
 # COMMAND ----------
 
 model_base = TrainDecisionTreeModel(train, si_base + [va_base], outcomeName, maxDepth=1, maxBins=6653)
-PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
-
-# COMMAND ----------
-
-model_base = TrainDecisionTreeModel(train_avro, si_base + [va_base], outcomeName, maxDepth=1, maxBins=6653)
-PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
-
-# COMMAND ----------
-
 PredictAndEvaluate(model_base, val, "val", outcomeName)
-
-# COMMAND ----------
-
-PredictAndEvaluate(model_base, val_avro, "val-avro", outcomeName)
+PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
 
 # COMMAND ----------
 
@@ -713,13 +707,66 @@ PredictAndEvaluate(model_base, val_avro, "val-avro", outcomeName)
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Discussion on Dataset Balancing
 
 # COMMAND ----------
 
+def PrepareDatasetForStacking(train, outcomeName, majClass = 0, minClass = 1):
+  # Determine distribution of dataset for each outcome value (zero & one)
+  ones, zeros = train.groupBy(outcomeName).count().sort(train[outcomeName].desc()).toPandas()["count"].to_list()
+
+  # Set number of models & number of datasets (2 more than ratio majority to minority class)
+  num_models = int(zeros/ones) + 2
+  print("Number of models : " + str(num_models))
+  
+  # Split dataset for training individual modesl and for training the voting (ensemble) model
+  zero_df, zero_df_train_ensemble = train.filter(outcomeName + ' == ' + str(majClass)).randomSplit([0.5, 0.5], 1)
+  one_df, one_df_train_ensemble  = train.filter(outcomeName + ' == ' + str(minClass)).randomSplit([0.5, 0.5], 1)
+
+  # Construct dataset for voting (ensemble) model
+  train_ensemble = zero_df_train_ensemble.union(one_df_train_ensemble).sample(False, 0.999999999999, 1)
+
+  # get number of values in minority class
+  one_df_count = one_df.count()
+  print("Minority Class Size: ", one_df_count)
+  
+  zeros_array = zero_df.randomSplit([1.0] * num_models, 1)
+  zeros_array_count = [s.count() for s in zeros_array]
+  ones_array = [one_df.sample(False, min(0.999999999999, r/one_df_count), 1) for r in zeros_array_count]
+  ones_array_count = [s.count() for s in ones_array]
+
+  # Array of `num_models` datasets
+  # below resampling may not be necessary for random forest.
+  # Need to remove it in case of performance issues
+  train_models = [a.union(b).sample(False, 0.999999999999, 1) for a, b in zip(zeros_array, ones_array)]
+  
+  return (train_models, train_ensemble)
+
+# Prepare datasets for stacking
+train_datasets, train_ensemble_dataset = PrepareDatasetForStacking(train, outcomeName)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Forest of Decision Trees with Dataset Stacking
+
+# COMMAND ----------
+
+def TrainEnsembleDecisionTrees(train_datasets, train_ensemble_dataset, stages, outcomeName, maxDepth, maxBins):
+  ensemble_model = []
+  for num, df in enumerate(train_datasets):
+    print("Training DecisionTreeClassifier model : " + str(num))
+    TrainDecisionTreeModel(df, stages, outcomeName, maxDepth=maxDepth, maxBins=maxBins)
+    ensemble_model.append(model_dt)
+
+  return ensemble_model
+
+dt_ensemble = 
 
 # COMMAND ----------
 
