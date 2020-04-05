@@ -21,6 +21,15 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Importing Dependencies
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## II. EDA & Discussion of Challenges
 # MAGIC 
 # MAGIC ### Dataset Introduction
@@ -38,16 +47,20 @@
 
 # COMMAND ----------
 
-# Read in original dataset
-airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
-print("Number of records in original dataset:", airlines.count())
+def LoadAirlineDelaysData():
+  # Read in original dataset
+  airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
+  print("Number of records in original dataset:", airlines.count())
 
-# Filter to datset with entries where diverted != 1, cancelled != 1, and dep_delay != Null
-airlines = airlines.where('DIVERTED != 1') \
-                   .where('CANCELLED != 1') \
-                   .filter(airlines['DEP_DEL15'].isNotNull()) 
+  # Filter to datset with entries where diverted != 1, cancelled != 1, and dep_delay != Null
+  airlines = airlines.where('DIVERTED != 1') \
+                     .where('CANCELLED != 1') \
+                     .filter(airlines['DEP_DELAY'].isNotNull()) 
 
-print("Number of records in reduced dataset: ", airlines.count())
+  print("Number of records in reduced dataset: ", airlines.count())
+  return airlines
+
+airlines = LoadAirlineDelaysData()
 
 # COMMAND ----------
 
@@ -58,6 +71,11 @@ display(airlines.take(6))
 
 # MAGIC %md
 # MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirty of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for future flights. 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Explanation for why we chose the variable we chose (rationale for why not all variables are available at inference time)
 
 # COMMAND ----------
 
@@ -159,11 +177,94 @@ display(airlines.take(6))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Creating our Outcome Variable: `Dep_Del30`
+
+# COMMAND ----------
+
+# Generate other Departure Delay outcome indicators for n minutes
+def CreateNewDepDelayOutcome(data, thresholds):
+  for threshold in thresholds:
+    data = data.withColumn('Dep_Del' + str(threshold), (data['Dep_Delay'] >= threshold).cast('integer'))
+  return data  
+  
+airlines = CreateNewDepDelayOutcome(airlines, [30])
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Filter to Columns Available at Inference Time
+
+# COMMAND ----------
+
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+joiningFeatures = ['FL_Date'] # Features needed to join with the holidays dataset--not needed for training
+
+airlines = airlines.select([outcomeName] + numFeatureNames + catFeatureNames + joiningFeatures)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Split Dataset into train/val/test & save to disk as parquet & avro
+
+# COMMAND ----------
+
+def SplitDataset(airlines):
+  # Split airlines data into train, dev, test
+  test = airlines.where('Year = 2019') # held out
+  train, val = airlines.where('Year != 2019').randomSplit([7.0, 1.0], 6)
+
+  # Select a mini subset for the training dataset (~2000 records)
+  mini_train = train.sample(fraction=0.0001, seed=6)
+
+  print("mini_train size = " + str(mini_train.count()))
+  print("train size = " + str(train.count()))
+  print("val size = " + str(val.count()))
+  print("test size = " + str(test.count()))
+  
+  return (mini_train, train, val, test) 
+
+mini_train, train, val, test = SplitDataset(airlines)
+
+# COMMAND ----------
+
+# Write train & val data to parquet for easier EDA
+def WriteAndRefDataToParquet(data, dataName):
+  # Write data to parquet format (for easier EDA)
+  data.write.mode('overwrite').format("parquet").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+  
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
+train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Show columns of interest summarized with counts of null values & summary stats
 # MAGIC * Clearly explain & define each variable
 # MAGIC * Justify missing values & how will handle
 # MAGIC * Addres feature distributions
-# MAGIC 
+
+# COMMAND ----------
+
+# Get number of distinct values for each column in full training dataset
+display(train_and_val.agg(*(F.countDistinct(F.col(c)).alias(c) for c in train_and_val.columns)))
+
+# COMMAND ----------
+
+# get summary stats for the full training dataset
+display(train_and_val.describe())
+
+# COMMAND ----------
+
+# get number of null values for each column (none!)
+display(train_and_val.select([F.count(F.when(F.isnan(c) | F.col(c).isNull(), c)).alias(c) for c in [outcomeName] + numFeatureNames + catFeatureNames]))
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Cover the following
 # MAGIC * General EDA of vars
 # MAGIC * Binning
@@ -171,6 +272,235 @@ display(airlines.take(6))
 # MAGIC * Ordering of Categorical Variables (Brieman's Theorem)
 # MAGIC * only do modifications to training split
 # MAGIC * save result to cluster
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Bin Numerical Features (reducing potential splits)
+
+# COMMAND ----------
+
+from pyspark.ml.feature import Bucketizer
+
+# Augments the provided dataset for the given feature/variable with a binned version
+# of that variable, as defined by splits parameter
+# Column name suffixed with '_bin' will be the binned column
+# Column name suffixed with '_binlabel' will be the nicely-named version of the binned column, using provided labels
+def BinFeature(df, featureName, splits, labels=None):
+  if (featureName + "_bin" in df.columns):
+    print("Variable '" + featureName + "_bin' already exists")
+    return df
+    
+  # Generate binned column for feature
+  bucketizer = Bucketizer(splits=splits, inputCol=featureName, outputCol=featureName + "_bin")
+  df_bin = bucketizer.setHandleInvalid("keep").transform(df)
+  
+  if (labels is not None):
+    # Map bucket number to binned feature label
+    bucketMaps = {}
+    bucketNum = 0
+    for l in labels:
+      bucketMaps[bucketNum] = l
+      bucketNum = bucketNum + 1
+
+    # Generate new column with binned feature label (human-readable)
+    def newCols(x):
+      return bucketMaps[x]
+    callnewColsUdf = udf(newCols, StringType())
+    df_bin = df_bin.withColumn(featureName + "_binlabel", callnewColsUdf(F.col(featureName + "_bin")))
+    
+  return df_bin
+
+# Bin numerical features in entire airlines dataset
+# Note that splits are not based on test set but are applied to test set (as would be applied at inference time)
+airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400]) # 2-hour blocks
+airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400]) # 2-hour blocks
+airlines = BinFeature(airlines, 'CRS_Elapsed_Time', splits = [float("-inf"), 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, float("inf")]) # 1-hour blocks
+binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+
+display(airlines.take(6))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Add Interaction Features
+
+# COMMAND ----------
+
+# Given a tuple specifying the two features to interact and the new name of the feature,
+# Creates an interaction term corresponding to each tuple
+def AddInteractions(df, featurePairsAndNewFeatureNames):
+  for (feature1, feature2, newName) in featurePairsAndNewFeatureNames:
+    if (newName in df.columns):
+      print("Variable '" + newName + "' already exists")
+      continue
+    
+    # Generate interaction feature (concatenation of two features)
+    df = df.withColumn(newName, F.concat(F.col(feature1), F.lit('-'), F.col(feature2)))
+    
+  return df
+
+# Make interaction features on airlines dataset
+# Note that interactions are independentently defined for each record
+interactions = [('Month', 'Day_Of_Month', 'Day_Of_Year'), 
+                ('Origin', 'Dest', 'Origin_Dest'),
+                ('Day_Of_Week', 'CRS_Dep_Time_bin', 'Dep_Time_Of_Week'),
+                ('Day_Of_Week', 'CRS_Arr_Time_bin', 'Arr_Time_Of_Week')]
+intFeatureNames = [i[2] for i in interactions]
+airlines = AddInteractions(airlines, interactions)
+display(airlines.take(6))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Add Holidays Feature
+
+# COMMAND ----------
+
+from dateutil.relativedelta import relativedelta, SU, MO, TU, WE, TH, FR, SA
+import pandas as pd
+import datetime as dt
+
+def AddHolidayFeature(df):
+  if ('Holiday' in df.columns):
+      print("Variable 'Holiday' already exists")
+  
+  # Import dataset of government holidays
+  holiday_df_raw = spark.read.csv("dbfs:/user/shajikk@ischool.berkeley.edu/scratch/" + 'holidays.csv').toPandas()
+  holiday_df_raw.columns = ['ID', 'FL_DATE', 'Holiday']
+
+  def get_limits(date):
+    given_date = dt.datetime.strptime(date,'%Y-%m-%d')
+    this_day = given_date.strftime('%a')
+
+    lastSun = given_date + relativedelta(weekday=SU(-1))
+    lastMon = given_date + relativedelta(weekday=MO(-1))
+    lastTue = given_date + relativedelta(weekday=TU(-1))
+    lastWed = given_date + relativedelta(weekday=WE(-1))
+    lastThu = given_date + relativedelta(weekday=TH(-1))
+    lastFri = given_date + relativedelta(weekday=FR(-1))
+    lastSat = given_date + relativedelta(weekday=SA(-1))
+    thisSun = given_date + relativedelta(weekday=SU(1))
+    thisMon = given_date + relativedelta(weekday=MO(1))
+    thisTue = given_date + relativedelta(weekday=TU(1))
+    thisWed = given_date + relativedelta(weekday=WE(1))
+    thisThu = given_date + relativedelta(weekday=TH(1))
+    thisFri = given_date + relativedelta(weekday=FR(1))
+    thisSat = given_date + relativedelta(weekday=SA(1)) 
+
+    if this_day == 'Sun' : prev, nxt = lastFri, thisMon
+    if this_day == 'Mon' : prev, nxt = lastFri, thisMon
+    if this_day == 'Tue' : prev, nxt = lastFri, thisTue
+    if this_day == 'Wed' : prev, nxt = lastFri, thisWed
+    if this_day == 'Thu' : prev, nxt = lastWed, thisSun
+    if this_day == 'Fri' : prev, nxt = lastThu, thisMon
+    if this_day == 'Sat' : prev, nxt = lastFri, thisMon
+
+    return prev.strftime("%Y-%m-%d"), prev.strftime('%a'),  nxt.strftime("%Y-%m-%d"), nxt.strftime('%a')
+
+  holiday_df = pd.DataFrame()
+  for index, row in holiday_df_raw.iterrows():
+      prev, prev_day, nxt, nxt_day = get_limits(row['FL_DATE'])
+      line = pd.DataFrame({"ID": 0, "date": prev, "holiday" : 'before'}, index=[index-0.5])
+      holiday_df = holiday_df.append(line, ignore_index=False)
+
+      line = pd.DataFrame({"ID": 0, "date": row['FL_DATE'], "holiday" : 'holiday'}, index=[index])
+      holiday_df = holiday_df.append(line, ignore_index=False)
+
+      line = pd.DataFrame({"ID": 0, "date": nxt, "holiday" : 'after'}, index=[index+0.5])
+      holiday_df = holiday_df.append(line, ignore_index=False)
+
+  holiday_df = holiday_df.sort_index().reset_index(drop=True).drop("ID",  axis=1)
+
+  # Convert holidays pandas dataframe to a pyspark dataframe for easier joining
+  schema = StructType([StructField("FL_DATE", StringType(), True), StructField("Holiday", StringType(), True)])
+  holiday = spark.createDataFrame(holiday_df, schema)
+  
+  # Add new holiday/no holiday column to dataset
+  return df.join(F.broadcast(holiday), df.FL_Date == holiday.FL_DATE, how='left').drop(holiday.FL_DATE).na.fill("not holiday")
+
+# Add holidays indicator to airlines dataset
+# Note that holidays are known well in advance of a flight and are not specific to the training dataset
+holFeatureNames = ['Holiday']
+airlines = AddHolidayFeature(airlines)
+display(airlines.take(1000))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Add Origin Activity Feature
+
+# COMMAND ----------
+
+def AddOriginActivityFeature(df):
+  if ('Origin_Activity' in df.columns):
+      print("Variable 'Origin_Activity' already exists")
+  
+  # Construct a flight bucket attribute to group flights occuring on the same day in the same time block originating from the same airport
+  # Compute aggregated statistics for these flight buckets
+  df = df.withColumn("flightbucket", F.concat_ws("-", F.col("Month"), F.col("Day_Of_Month"), F.col("CRS_Dep_Time_bin"), F.col("Origin")))
+  originActivityAgg = df.groupBy("flightbucket").count()
+  
+  # Join aggregated statistics back to original dataframe
+  df = df.join(F.broadcast(originActivityAgg), df.flightbucket == originActivityAgg.flightbucket, how='left') \
+         .drop(originActivityAgg.flightbucket) \
+         .drop('flightbucket') \
+         .withColumnRenamed('count', 'Origin_Activity')
+  return df
+
+# Add OriginActivity feature
+# Note that the scheduled origin activity is known well in advance of a flight and is not specific to the training dataset
+orgFeatureNames = ['Origin_Activity']
+airlines = AddOriginActivityFeature(airlines)
+display(airlines.take(1000))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Write and Reference augmented airlines
+
+# COMMAND ----------
+
+airlines = WriteAndRefDataToParquet(airlines, 'augmented')
+
+# COMMAND ----------
+
+# Regenerate splits & save & reference
+mini_train, train, val, test = SplitDataset(airlines)
+mini_train = WriteAndRefDataToParquet(mini_train, 'augmented_mini_train')
+train = WriteAndRefDataToParquet(train, 'augmented_train')
+val = WriteAndRefDataToParquet(val, 'augmented_val')
+test = WriteAndRefDataToParquet(test, 'augmented_test')
+
+# COMMAND ----------
+
+# Write data to avro for easier row-wise training
+def WriteAndRefDataToAvro(data, dataName):
+  # Write data to avro format
+  data.write.mode('overwrite').format("avro").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
+  
+  # Read data back directly from disk 
+  return spark.read.format("avro").load(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
+
+mini_train_avro = WriteAndRefDataToAvro(mini_train, 'augmented_mini_train')
+train_avro = WriteAndRefDataToAvro(train, 'augmented_train')
+val_avro = WriteAndRefDataToAvro(val, 'augmented_val')
+test_avro = WriteAndRefDataToAvro(test, 'augmented_test')
+
+# COMMAND ----------
+
+print("All features at disposal:")
+print(" - Numerical Features: ", numFeatureNames)
+print(" - Categorical Features: ", catFeatureNames)
+print(" - Binned Features: " binFeatureNames)
+print(" - Interaction Features: ", intFeatureNames)
+print(" - Holiday Feature: ", holFeatureNames)
+print(" - Origin Activity Feature: ", orgFeatureNames)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Apply Breiman's Theorem to Categorical & Interaction Features!!!
 
 # COMMAND ----------
 
@@ -216,6 +546,76 @@ display(airlines.take(6))
 # MAGIC ### Modeling Helpers
 # MAGIC * Evaluation functions
 # MAGIC * Decision Tree PrintModel Function
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+def EvaluateModelPredictions(predictions, dataName=None):   
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+
+# COMMAND ----------
+
+import ast
+import random
+
+# Visualize the decision tree model that was trained in text form
+# Note that the featureNames need to be in the same order they were provided
+# to the vector assembler prior to training the model
+def PrintDecisionTreeModel(model, featureNames):
+  lines = model.toDebugString.split("\n")
+  featuresUsed = set()
+  
+  for line in lines:
+    parts = line.split(" ")
+
+    # Replace "feature #" with feature name
+    if ("feature" in line):
+      featureNumIdx = parts.index("(feature") + 1
+      featureNum = int(parts[featureNumIdx])
+      parts[featureNumIdx] = featureNames[featureNum] # replace feature number with actual feature name
+      parts[featureNumIdx - 1] = "" # remove word "feature"
+      featuresUsed.add(featureNames[featureNum])
+      
+    # For cateogrical features, summarize sets of values selected for easier reading
+    if ("in" in parts):
+      setIdx = parts.index("in") + 1
+      vals = ast.literal_eval(parts[setIdx][:-1])
+      vals = list(vals)
+      numVals = len(vals)
+      if (len(vals) > 5):
+        newVals = random.sample(vals, 5)
+        newVals = [str(int(d)) for d in newVals]
+        newVals.append("...")
+        vals = newVals
+      parts[setIdx] = str(vals) + " (" + str(numVals) + " total values)"
+      
+    line = " ".join(parts)
+    print(line)
+    
+  print("\n", "Provided Features: ", featureNames)
+  print("\n", "    Used Features: ", featuresUsed)
 
 # COMMAND ----------
 
