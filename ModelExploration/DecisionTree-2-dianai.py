@@ -530,6 +530,200 @@ modelResults8[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResul
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Combining Stacks....
+
+# COMMAND ----------
+
+# Until we figure out how to do an ensemble approach, trying merging all 7 stacks and saving as a single parquet (so there will be 7 duplicates of delay=1 data)
+train_dep_full_stack = train_dep_stacks[0]
+for i in range(1, len(train_dep_stacks)):
+  train_dep_full_stack = train_dep_full_stack.union(train_dep_stacks[i])
+train_dep_full_stack.write.mode('overwrite').format("parquet").save("dbfs/user/team20/train_dep_stacks/full_stack.parquet")
+train_dep_full_stack = spark.read.option("header", "true").parquet(f"dbfs/user/team20/train_dep_stacks/full_stack.parquet")
+
+# COMMAND ----------
+
+display(train_dep_full_stack.groupBy(outcomeName).count())
+
+# COMMAND ----------
+
+# Retried Model 9: Same model 8, except using full stacks as single training dataset
+b9featureNames = [f[0:-5] for f in bfeatureNames]
+n9featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] + b9featureNames
+s9featureNames = cfeatureNames + ifeatureNames
+
+si9 = PrepStringIndexer(s9featureNames)
+va9 = PrepVectorAssembler(n9featureNames, s9featureNames)
+modelResults9 = TrainAndEvaluate(train_dep_full_stack, si9 + [va9], outcomeName, maxDepth=8, maxBins=6647, evalTrainingData=True)
+printModel(modelResults9[0].stages[-1], n9featureNames + s9featureNames)
+
+# COMMAND ----------
+
+modelResults9[0].save(f"dbfs/user/team20/DecisionTree-2-dianai-models/modelResults9_dtmodel.txt")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Trying a Random Forest Model with the full stack data
+# MAGIC ### (before implementing own ensemble approach...)
+
+# COMMAND ----------
+
+from pyspark.ml.classification import RandomForestClassifier
+
+def TrainAndEvaluateRF(trainingData, varStages, outcomeName, maxDepth, maxBins, numTrees=20, impurity='gini' evalTrainingData = False):
+  # Train Model
+  rf = RandomForestClassifier(labelCol=outcomeName, featuresCol="features", seed=6, maxDepth=maxDepth, maxBins=maxBins, numTrees=numTrees, impurity=impurity) 
+  pipeline = Pipeline(stages = varStages + [rf])
+  rf_model = pipeline.fit(trainingData)
+  
+  # Evaluate Model
+  if (evalTrainingData):
+    training_data_res = EvaluateModelPredictions(rf_model, trainingData, "training data", outcomeName)
+  mini_train_res = EvaluateModelPredictions(rf_model, mini_train_dep, "mini-training", outcomeName)
+  train_res = EvaluateModelPredictions(rf_model, train_dep, "training", outcomeName)
+  val_res = EvaluateModelPredictions(rf_model, val_dep, "validation", outcomeName)
+  
+  if (evalTrainingData):
+    return (rf_model, training_data_res, mini_train_res, train_res, val_res)
+  else:
+    return (rf_model, mini_train_res, train_res, val_res)
+
+# COMMAND ----------
+
+b10featureNames = [f[0:-5] for f in bfeatureNames]
+n10featureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] + b10featureNames
+s10featureNames = cfeatureNames + ifeatureNames
+
+si10 = PrepStringIndexer(s10featureNames)
+va10 = PrepVectorAssembler(n10featureNames, s10featureNames)
+modelResults10 = TrainAndEvaluateRF(train_dep_full_stack, si10 + [va10], outcomeName, maxDepth=8, maxBins=6647, numTrees=7, impurity='gini', evalTrainingData=True)
+#printModel(modelResults10[0].stages[-1], n10featureNames + s10featureNames)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Try Smoting on Mini Train
+
+# COMMAND ----------
+
+import random
+import math
+from math import sqrt
+from pyspark.sql import Row
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml.linalg import DenseVector
+from pyspark.ml import Pipeline
+
+sc = spark.sparkContext
+
+def vectorizerFunction(dataInput, outcomeName, strVars, numVars):
+    # Prep Vector assembler
+    si = [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in strVars]
+    va = VectorAssembler(inputCols = numVars + [f + "_idx" for f in strVars], outputCol = "features")
+
+    # Build a pipeline
+    pipeline = Pipeline(stages= si + [va])
+    pipelineModel = pipeline.fit(dataInput)
+
+    # Vectorize
+    pos_vectorized = pipelineModel.transform(dataInput)
+    vectorized = pos_vectorized.select('features', outcomeName).withColumn('label',pos_vectorized[outcomeName]).drop(outcomeName)
+
+    return vectorized
+
+
+# Calculate the Euclidean distance between two feature vectors
+def euclidean_distance(row1, row2):
+	distance = 0.0
+	for i in range(len(row1)-1):
+		distance += (row1[i] - row2[i])**2
+	return sqrt(distance)
+
+
+# Locate the most similar neighbors
+def get_neighbors(train, test_row, num_neighbors):
+	distances = list()
+	for train_row in train:
+		dist = euclidean_distance(test_row, train_row)
+		distances.append((train_row, dist))
+	distances.sort(key=lambda tup: tup[1])
+	neighbors = list()
+	for i in range(num_neighbors):
+		neighbors.append(distances[i+1][0])
+	return neighbors
+
+
+# Generate synthetic records
+def synthetic(list1, list2):
+    synthetic_records = []
+    for i in range(len(list1)):
+      synthetic_records.append(round(list1[i] + ((list2[i]-list1[i])*random.uniform(0, 1))))
+    return synthetic_records
+
+
+def SmoteSampling(vectorized, k = 5, minorityClass = 1, majorityClass = 0):
+
+    # Partition Vectorized Data to minority & majority classes
+    dataInput_min = vectorized[vectorized['label'] == minorityClass]
+    dataInput_maj = vectorized[vectorized['label'] == majorityClass]
+
+    # Extracting feature vectors of minority group
+    featureVect = dataInput_min.select('features')
+
+    # Convert features dataframe into a list
+    feature_list = featureVect.rdd.map(lambda x: list(x[0])).collect()
+
+    # Empty list to add synthetic data
+    newRecords = []
+
+    # For each existing feature, create new features with k nearest neighbors
+    for feature in feature_list:
+      neighbors = get_neighbors(feature_list, feature, k)
+      for neigh in neighbors:
+          newRec = synthetic(feature, neigh)
+          newRecords.append(newRec)
+
+    # Convert the synthetic data into a dataframe
+    newData_rdd = sc.parallelize(newRecords)
+    newData_rdd = newData_rdd.map(lambda x: Row(features = DenseVector(x), label = 1))
+    new_data_df = newData_rdd.toDF()
+
+    # Adding the synthetic data to existing data in minority group
+    new_data_minor = dataInput_min.unionAll(new_data_df)
+
+    return dataInput_maj.unionAll(new_data_minor)
+
+# Applying SMOTE on train dataset with selected features
+vectorized = vectorizerFunction(mini_train_dep, outcomeName, cfeatureNames + bfeatureNames + ifeatureNames, nfeatureNames)
+mini_train_dep_smoted = SmoteSampling(vectorized, k = 6, minorityClass = 1, majorityClass = 0)
+
+# COMMAND ----------
+
+display(mini_train_dep_smoted.groupBy('label').count())
+
+# COMMAND ----------
+
+# Retrain Model 2 as Model 7: Use all prepared variables on training, but only first stack
+modelResultss = TrainAndEvaluate(mini_train_dep_smoted, sis + [vas], 'label', maxDepth=5, maxBins=6647, evalTrainingData=True)
+printModel(modelResultss[0].stages[-1], nfeatureNames + cfeatureNames + bfeatureNames + ifeatureNames)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
 
 
 # COMMAND ----------
