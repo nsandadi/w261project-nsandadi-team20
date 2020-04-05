@@ -208,6 +208,43 @@ display(airlines.take(6))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Toy Example: Decision Trees
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Modeling Helpers
+# MAGIC * Evaluation functions
+# MAGIC * Decision Tree PrintModel Function
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Baseline Model: Predicting the Majority Class
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### First Decision Tree with no fine-tuning/dataset balancing
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Discussion on Dataset Balancing
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Forest of Decision Trees with Dataset Stacking
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Forest of Random Forests with Dataset Stacking
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## VI. Conclusions
 # MAGIC * Visualize Model Scores:
 # MAGIC     - Confusion Matrix!!
