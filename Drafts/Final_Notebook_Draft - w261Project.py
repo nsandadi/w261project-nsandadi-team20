@@ -489,13 +489,14 @@ test_avro = WriteAndRefDataToAvro(test, 'augmented_test')
 
 # COMMAND ----------
 
-print("All features at disposal:")
-print(" - Numerical Features: ", numFeatureNames)
-print(" - Categorical Features: ", catFeatureNames)
-print(" - Binned Features: " binFeatureNames)
-print(" - Interaction Features: ", intFeatureNames)
-print(" - Holiday Feature: ", holFeatureNames)
-print(" - Origin Activity Feature: ", orgFeatureNames)
+print("All Available Features:")
+print("------------------------")
+print(" - Numerical Features: \t\t", numFeatureNames)
+print(" - Categorical Features: \t", catFeatureNames)
+print(" - Binned Features: \t\t", binFeatureNames)
+print(" - Interaction Features: \t", intFeatureNames)
+print(" - Holiday Feature: \t\t", holFeatureNames)
+print(" - Origin Activity Feature: \t", orgFeatureNames)
 
 # COMMAND ----------
 
@@ -537,6 +538,26 @@ print(" - Origin Activity Feature: ", orgFeatureNames)
 
 # COMMAND ----------
 
+#re-read augmented data in parquet & avro formats
+def ReadDataInParquetAndAvro(dataName):
+  data_parquet = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+  data_avro = spark.read.format("avro").load(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
+  return (data_parquet, data_avro)
+
+mini_train, mini_train_avro = ReadDataInParquetAndAvro('augmented_mini_train')
+train, train_avro = ReadDataInParquetAndAvro('augmented_train')
+val, val_avro = ReadDataInParquetAndAvro('augmented_val')
+test, test_avro = ReadDataInParquetAndAvro('augmented_test')
+
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
+holFeatureNames = ['Holiday']
+orgFeatureNames = ['Origin_Activity']
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Toy Example: Decision Trees
 
@@ -549,33 +570,32 @@ print(" - Origin Activity Feature: ", orgFeatureNames)
 
 # COMMAND ----------
 
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import StringIndexer
 
-def EvaluateModelPredictions(predictions, dataName=None):   
-  print("\nModel Evaluation - ", dataName)
-  print("------------------------------------------")
+# Encodes a string column of labels to a column of label indices
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
+# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
+def PrepStringIndexer(stringfeatureNames):
+  return [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in stringfeatureNames]
 
-  # Accuracy
-  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="accuracy")
-  accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t", accuracy)
-
-  # Recall
-  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="weightedRecall")
-  recall = evaluator.evaluate(predictions)
-  print("Recall:\t\t", recall)
-
-  # Precision
-  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction", metricName="weightedPrecision")
-  precision = evaluator.evaluate(predictions)
-  print("Precision:\t", precision)
-
-  # F1
-  evaluator = MulticlassClassificationEvaluator(predictionCol="prediction",metricName="f1")
-  f1 = evaluator.evaluate(predictions)
-  print("F1:\t\t", f1)
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+def PrepVectorAssembler(numericalFeatureNames, stringFeatureNames):
+  return VectorAssembler(inputCols = numericalFeatureNames + [f + "_idx" for f in stringFeatureNames], outputCol = "features")
 
 # COMMAND ----------
+
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml import Pipeline
+
+def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins):
+  # Train Model
+  dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
+  pipeline = Pipeline(stages = stages + [dt])
+  dt_model = pipeline.fit(trainingData)
+  return dt_model
 
 import ast
 import random
@@ -586,6 +606,8 @@ import random
 def PrintDecisionTreeModel(model, featureNames):
   lines = model.toDebugString.split("\n")
   featuresUsed = set()
+  print("\n")
+  
   
   for line in lines:
     parts = line.split(" ")
@@ -616,11 +638,73 @@ def PrintDecisionTreeModel(model, featureNames):
     
   print("\n", "Provided Features: ", featureNames)
   print("\n", "    Used Features: ", featuresUsed)
+  print("\n")
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Evaluates model predictions for the provided predictions
+# Predictions must have two columns: prediction & label
+def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+
+# COMMAND ----------
+
+def PredictAndEvaluate(model, data, dataName, outcomeName):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Baseline Model: Predicting the Majority Class
+
+# COMMAND ----------
+
+features_base = (numFeatureNames + binFeatureNames + orgFeatureNames, # numerical features
+                 catFeatureNames + intFeatureNames + holFeatureNames) # string features
+si_base = PrepStringIndexer(features_base[1])
+va_base = PrepVectorAssembler(numericalFeatureNames = features_base[0], stringFeatureNames = features_base[1])
+
+# COMMAND ----------
+
+model_base = TrainDecisionTreeModel(train, si_base + [va_base], outcomeName, maxDepth=1, maxBins=6653)
+PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
+
+# COMMAND ----------
+
+model_base = TrainDecisionTreeModel(train_avro, si_base + [va_base], outcomeName, maxDepth=1, maxBins=6653)
+PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_base, val, "val", outcomeName)
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_base, val_avro, "val-avro", outcomeName)
 
 # COMMAND ----------
 
