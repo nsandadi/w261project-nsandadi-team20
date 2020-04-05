@@ -75,6 +75,61 @@ display(airlines.take(6))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Mention Algorithms we'll consider in part IV
+# MAGIC * Logistic Regression
+# MAGIC * Decision Trees
+# MAGIC * Naive Bayes
+# MAGIC * Support Vector Machines
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### EDA Task #1: Exploring Scheduled Departure & Arrival Times
+# MAGIC * There are a lot of unique departure & arrival times that are numerical features, but the time 2300 isn't much different from 2305 to 2310
+# MAGIC * May be worthwhile to bin things
+# MAGIC     - fewer splits for decision tree to consider
+# MAGIC     - can estimate effects of unique time blocks departure delays (more meaningful/interpretable)
+# MAGIC     - do have more coefficients to estimate in LR (1 for each bin value)
+# MAGIC * Show barplots of delay/no delay distributions for numerical values and binned values (maybe even show ordered by probability of departure delay--Diana EDA)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### EDA Task #2: Categorical Variables & Reducing # of Splits (for Decision Trees)
+# MAGIC * Some categorical variables have few values (e.g. carrier)
+# MAGIC      - good for Decision Trees, because it introduces fewer splits to have to consider
+# MAGIC      - can still define distinct sets of delayed & not delayed airlines
+# MAGIC      - show probability charts b/c clearly some are more delayed than others
+# MAGIC * Other categorical variables have a lot of values (e.g. origin/dest airports) & have no implicit ordering
+# MAGIC      - should incorporate things like Breiman's method to reduce number of splits for decision trees
+# MAGIC      - effectivley want to give an ordering to categories
+# MAGIC      - using Breiman's method makes things more scalable
+# MAGIC      - Can rank, for example based on probability of delay and use this ranking in place of actual origin/dest categories
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### EDA Task #3: Unbalanced Dataset
+# MAGIC * Show how dataset is drastically unbalanced (especially as you increase the dep_delay threshold)
+# MAGIC * Discuss stacking and what that tries to do (how we'll eventually want an ensemble approach to support this)
+# MAGIC * If can get SMOTE working to be scalable, also discuss SMOTE and what it effectively does
+# MAGIC    - do discuss scalability concerns, b/c do need to apply knn algo & predict on each datapoint
+# MAGIC * Discuss how balancing the dataset with stacking or SMOTE allows us to ensure that our models don't become biased towards the no-delay class, but it does introduce some more variance (bias-variance tradeoff)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Challenges when send algorithms to scale
+# MAGIC * For training Decision Tree, will want to rely on parquet format (since we do feature eval independently for each row)
+# MAGIC * for Decision Tree Prediction, we'll likely want avro format (since we do inference on unique rows)
+# MAGIC * for Logistic regression training & prediction, we'll want to train & predict on avro
+# MAGIC * SVM challenges with categorical variables with large numbers of cateogries (origin & dest--will have very long 1-hot encoded vectors)
+# MAGIC * Naive Bayes ____________________
+# MAGIC * For Ensemble methods, training models in parallel
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## III. Feature Engineering
 # MAGIC - Cleaning
 # MAGIC     - Remove cancelled/diverted flights (don't have full data)
@@ -101,6 +156,22 @@ display(airlines.take(6))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Show columns of interest summarized with counts of null values & summary stats
+# MAGIC * Clearly explain & define each variable
+# MAGIC * Justify missing values & how will handle
+# MAGIC * Addres feature distributions
+# MAGIC 
+# MAGIC ### Cover the following
+# MAGIC * General EDA of vars
+# MAGIC * Binning
+# MAGIC * Interaction Terms
+# MAGIC * Ordering of Categorical Variables (Brieman's Theorem)
+# MAGIC * only do modifications to training split
+# MAGIC * save result to cluster
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## IV. Algorithm Exploration
 # MAGIC - Apply 2-3 Algorithms
 # MAGIC     - Logistic Regression
@@ -123,16 +194,31 @@ display(airlines.take(6))
 # MAGIC ## V. Algorithm Implementation
 # MAGIC - Toy example likely with a decision tree on a mini_mini_train dataset (like 10 rows)
 # MAGIC - Walk through training the model and doing inference
+# MAGIC - Show baseline "dummy" model results on train/validation/test that only predicts 0 (hardcode all predictions to be 0)
+# MAGIC - Show basic decision tree and how it performs with unstacked data & discuss dataset imbalance
+# MAGIC - Show how decision tree functions by comparison if we stack/smote the data (maybe with just a single stack)
+# MAGIC - Move to ensemble of Decision Trees with stacked approach (maybe smote)
+# MAGIC - Move to ensemble of Random Forests with stacked approach (maybe smote)
+# MAGIC - Also do GBT & ensemble of GBT (find a good explanation for why)
+# MAGIC - try to parallelize training of ensembles
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## VI. Conclusions
+# MAGIC * Visualize Model Scores:
+# MAGIC     - Confusion Matrix!!
+# MAGIC     - precision-recall curve?
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## V. Applications of Course Concepts
+# MAGIC - bias-variance tradeoff
+# MAGIC - 1-hot encoding for SVM's? 
+# MAGIC - Breiman's method
+# MAGIC - how data is stored on cluster
+# MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
 
 # COMMAND ----------
 
