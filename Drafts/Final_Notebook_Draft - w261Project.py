@@ -1,24 +1,22 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Final Notebook - Draft
+# MAGIC # Predicting Airline Delays - Final Notebook
+# MAGIC ###### W261 Spring 2020 
+# MAGIC ###### Presentation Date: April 16th, 2020
+# MAGIC ###### Team 20: Diana Iftimie, Shaji K Kunjumohamed, Navya Sandadi, & Shobha Sankar
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## I. Question Formulation
+# MAGIC %md 
+# MAGIC ## I. Question Formulation & Introduction
 # MAGIC 
-# MAGIC - Describe dataset high level (introduce it to give context)
-# MAGIC - Goal: Predict the event of a departure delay, given conditions of a flight (consider arrival delay as well)
-# MAGIC - Practical Departure Delay = greater than 30 minutes delay after scheduled departure time (CRS_Dep_Time)
-# MAGIC - Why perform analysis / what questions will this answer?
-# MAGIC     - Time is money
-# MAGIC     - airlines can better prepare people for delays --> make people happier by notifying them
-# MAGIC     - airlines can figure out problems and improve processes
-# MAGIC     - airports can better manage gates, air traffic control, general logistics
-# MAGIC     - can better predict arrival delay
-# MAGIC     - help people figure out what kind of flights to go on (carriers, origin, destination, dep/arrival time, distance, day of week, etc)
-# MAGIC       (what are the things people can actively change to minimize delay)
-# MAGIC - Should be better than the baseline (which is just predicting randomly with parameter p = probability of historical delay (~0.8)); should be interpretable to be practically useful
+# MAGIC As we've all probably experienced at some point in our lives, air travel is never easy. Whether you're the person getting on a flight traveling around the world, the folks in the air traffic control towers orchestrating incoming and outgoing flights, or the airports and airlines trying their best to effectively coordinate flights at every hour of every day of every year, so much can go wrong. The delays alone are enough to completely derail anyone's plans and trigger a cascading effect of consequences down the line as delays continue to stack up on top of each other over the course of time. And the biggest problem is that these delays often occur when we least expect them and at the worst possible times.
+# MAGIC 
+# MAGIC To attempt to solve this problem, we introduce the *Airline Delays* dataset, a dataset of US domestic flights from 2015 to 2019 collected by the Bureau of Transportation Statistics for the purpose of studying airline delays. For this analysis, we will primarily use this dataset to study the nature of airline delays in the united states over the last few years, with the ultimate goal of developing models for predicting signitifact flight departure delays (30 minutes or more) in the United States. 
+# MAGIC 
+# MAGIC In developing such models, we seek to answer the core question, **"Given known information prior to a flight's departure, can we predict departure delays and identify the likely causes of such delays?"**. In the last few years, about 11% of all US domestic flights resulted in significant delays, and answering these questions can truly help us to understand why such delays happen. In doing so, not only can airlines and airports start to identify likely causes and find ways to mitigate them and save both time and money, but air travelers also have the potential to better prepare for likely delays and possibly even plan for different flights in order to reduce their chance of significant delay. 
+# MAGIC 
+# MAGIC To effectively investigate this question and produce a practically useful model, we will aim to develop a model that performs better than a baseline model that predicts the majority class of 'no delay' 89% of the time (the equivalent of random guessing, which would have an accuracy of 89%). Given the classificatio nature of this problem, we will concentrate on improving metrics such precision, recall and F1 over our baseline models. We will also concentrate on producing models that can explain what features of flights known prior to departure time can best predict departure delays and from these, attempt to best infer possible causes of departure delays. 
 
 # COMMAND ----------
 
