@@ -569,7 +569,66 @@ outcomeName = 'Dep_Del30'
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ###### Dataset
 
+# COMMAND ----------
+
+# Build the toy example dataset from the cleaned and transformed mini training set
+toy_dataset = mini_train.select(['Dep_Del30', 'Year', 'Month', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin_Dest', 'Op_Unique_Carrier']) \
+                        .filter(mini_train['Dep_Del30'] == 0) \
+                        .sample(False, 0.00252, 8)
+
+toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Year', 'Month', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin_Dest', 'Op_Unique_Carrier']) \
+                         .filter(mini_train['Dep_Del30'] == 1) \
+                         .sample(False, 0.005, 8))
+
+display(toy_dataset)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Introduction
+# MAGIC - The first column 'Dep_Del30' is the label or outcome variable, and the rest of the columns are features. 
+# MAGIC - The goal of the decision tree is to predict the departure delay.
+# MAGIC - The dataset has both numeric and categorical features.
+# MAGIC - We use CART decision tree algorithm (Classification and Regression Trees). 
+# MAGIC - Decision trees use a process to ask certain questions at a certain point to make decisions about splitting the data.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Decision tree learning
+# MAGIC - Initially, we have a root node for the tree.
+# MAGIC - The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input.
+# MAGIC - Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets.
+# MAGIC - The subsets become input to the child nodes added to the tree for the next level of splitting.
+# MAGIC - The ultimate goal is to produce the purest distribution of labels at each node.
+# MAGIC - If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further.
+# MAGIC - On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further.
+# MAGIC - The trick to building an effective tree is to decide which questions to ask and when.
+# MAGIC - To do this, we need to quantify how well a question can split the dataset.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Gini impurity and Information gain
+# MAGIC - We quantify the amount of uncertainity at a single node by a metric called the gini impurity. 
+# MAGIC - We can quantify how much a question reduces the uncertainity by using a metric called the information gain.
+# MAGIC - These two metrics are used to select the best question at each split point. 
+# MAGIC - The best question reduces the uncertainity the most.
+# MAGIC - Given the question, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes).
+# MAGIC - This process continues until all the nodes are pure or we reach a stopping criteria (such as a certain number of examples).
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### View of tree building / completed tree
 
 # COMMAND ----------
 
