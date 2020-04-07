@@ -26,6 +26,7 @@
 # COMMAND ----------
 
 from pyspark.sql import functions as F
+from pyspark.sql.types import StructType, StructField, StringType
 
 # COMMAND ----------
 
@@ -173,6 +174,13 @@ display(airlines.take(6))
 # MAGIC     - computing # of flights per category
 # MAGIC     - computing probability of delay per category
 # MAGIC     - Try a model that includes these to see if the model selects them (Decision tree)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC More visualizations from our in-depth EDA can be found in notebook here:
+# MAGIC 
+# MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/3895804345790408/command/3895804345790409
 
 # COMMAND ----------
 
@@ -524,6 +532,47 @@ print(" - Origin Activity Feature: \t", orgFeatureNames)
 
 # COMMAND ----------
 
+# For the 4 models, can take train dataset & subset to the features in numFeatureNames & catFeatureNames
+# Bring in code for 4 models, train, and do prediction & evaluation on validation set
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Evaluates model predictions for the provided predictions
+# Predictions must have two columns: prediction & label
+def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+
+# COMMAND ----------
+
+def PredictAndEvaluate(model, data, dataName, outcomeName):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## V. Algorithm Implementation
 # MAGIC - Toy example likely with a decision tree on a mini_mini_train dataset (like 10 rows)
@@ -594,11 +643,13 @@ display(toy_dataset)
 # MAGIC - The dataset has both numeric and categorical features.
 # MAGIC - We use CART decision tree algorithm (Classification and Regression Trees). 
 # MAGIC - Decision trees use a process to ask certain questions at a certain point to make decisions about splitting the data.
+# MAGIC - It is a greedy algorithm that considers all features.
+# MAGIC - Pruning
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Decision tree learning
+# MAGIC ##### Decision tree inference
 # MAGIC - Initially, we have a root node for the tree.
 # MAGIC - The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input.
 # MAGIC - Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets.
@@ -623,7 +674,7 @@ display(toy_dataset)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### 
+# MAGIC ##### Math / Decision Tree Learning
 
 # COMMAND ----------
 
@@ -708,42 +759,6 @@ def PrintDecisionTreeModel(model, featureNames):
   print("\n", "Provided Features: ", featureNames)
   print("\n", "    Used Features: ", featuresUsed)
   print("\n")
-
-# COMMAND ----------
-
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
-
-# Evaluates model predictions for the provided predictions
-# Predictions must have two columns: prediction & label
-def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
-  print("\nModel Evaluation - ", dataName)
-  print("------------------------------------------")
-
-  # Accuracy
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
-  accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t", accuracy)
-
-  # Recall
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
-  recall = evaluator.evaluate(predictions)
-  print("Recall:\t\t", recall)
-
-  # Precision
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
-  precision = evaluator.evaluate(predictions)
-  print("Precision:\t", precision)
-
-  # F1
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
-  f1 = evaluator.evaluate(predictions)
-  print("F1:\t\t", f1)
-
-# COMMAND ----------
-
-def PredictAndEvaluate(model, data, dataName, outcomeName):
-  predictions = model.transform(data)
-  EvaluateModelPredictions(predictions, dataName, outcomeName)
 
 # COMMAND ----------
 
