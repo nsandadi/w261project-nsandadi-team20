@@ -90,11 +90,15 @@ catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 # take the train dataset and subset to the features in numFeatureNames & catFeatureNames
 # outcomeName + numFeatureNames + catFeatureNames
 
-def train_model(df,categoricalCols,continuousCols,labelCol,model,svmflag):
+def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
 
     from pyspark.ml import Pipeline
     from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
     from pyspark.sql.functions import col
+    from pyspark.ml.classification import LogisticRegression
+    from pyspark.ml.classification import DecisionTreeClassifier
+    from pyspark.ml.classification import NaiveBayes
+    from pyspark.ml.classification import LinearSVC
 
     indexers = [ StringIndexer(inputCol=c, outputCol="{0}_indexed".format(c))
                  for c in categoricalCols ]
@@ -132,18 +136,31 @@ def train_model(df,categoricalCols,continuousCols,labelCol,model,svmflag):
     else:
       pass
     
-    model=pipeline.fit(df)
-#     data = model.transform(df)
+    tr_model=pipeline.fit(df)
 
-#     data = data.withColumn('label',col(labelCol))
-
-#     return data.select('features','label')
-    return model
+    return tr_model
 
 # COMMAND ----------
 
-model = train_model(mini_train_algo,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-data = model.transform(mini_train_algo)
+model = 'svm'
+tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+
+# COMMAND ----------
+
+#     data = model.transform(df)
+
+#     data = data.withColumn('label',col(labelCol))
+models = ['lr','dt','nb','svm']
+for model in models:
+  if model == 'svm':
+    tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    PredictAndEvaluate(tr_model, val, dataName='Linear'+ model, outcomeName)
+  else:
+    tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    PredictAndEvaluate(tr_model, data, dataName, outcomeName)
+
+# model = train_model(mini_train_algo,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+data = model.transform(val)
 display(data.take(10))
 
 # COMMAND ----------
