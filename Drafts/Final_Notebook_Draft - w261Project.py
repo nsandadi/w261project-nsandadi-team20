@@ -27,6 +27,11 @@
 
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.ml.feature import VectorIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml import Pipeline
+
 
 # COMMAND ----------
 
@@ -537,6 +542,73 @@ print(" - Origin Activity Feature: \t", orgFeatureNames)
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
+# - Numerical Features: 		 ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+# - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
+# take the train dataset and subset to the features in numFeatureNames & catFeatureNames
+# outcomeName + numFeatureNames + catFeatureNames
+train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
+val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
+
+
+# Encodes a string column of labels to a column of label indices
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
+si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in catFeatureNames]
+
+# One hot Encode outputs
+# oh_encoder     = OneHotEncoderEstimator(inputCols=cat_columns, outputCols=all_outputCols)
+
+encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
+                 outputCol="{0}_encoded".format(indexer.getOutputCol()))
+                 for indexer in si ]
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+va = VectorAssembler(inputCols = numFeatureNames + [cat + "_idx" for cat in catFeatureNames], outputCol = "features")
+
+# Define Logistic regression
+lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0) 
+
+# Define Decision Tree Regression
+dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366) 
+
+# Naive Bayes Regression
+nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
+
+# svm 
+svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
+
+
+# Create our pipeline stages logistic regression
+pipeline = Pipeline(stages=indexers + [va, lr])
+
+# Create our pipeline stages decision tree
+pipeline = Pipeline(stages=indexers + [va, dt])
+
+# Create our pipeline stages logistic regression
+pipeline = Pipeline(stages=indexers + [va, nb])
+
+# Support Vector Machines
+pipeline = Pipeline(stages=indexers + encoder + [va, svc])
+
+# Run stages in pipeline and train the model
+lr_model = pipeline.fit(train_algo)
+
+# View the Decision Tree Model
+dt_model = pipeline.fit(train_algo)
+
+# Run stages in pipeline and train the model
+nb_model = pipeline.fit(train_algo)
+
+# Fit the model
+lin_svc_model = pipeline.fit(train_algo)
+
+# COMMAND ----------
+
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 
 # Evaluates model predictions for the provided predictions
@@ -690,9 +762,6 @@ display(toy_dataset)
 
 # COMMAND ----------
 
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.feature import StringIndexer
-
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
 # Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
@@ -708,7 +777,6 @@ def PrepVectorAssembler(numericalFeatureNames, stringFeatureNames):
 # COMMAND ----------
 
 from pyspark.ml.classification import DecisionTreeClassifier
-from pyspark.ml import Pipeline
 
 def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins):
   # Train Model
@@ -793,7 +861,55 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Discussion on Dataset Balancing
+# MAGIC ### Ensemble training & Balancing dataset
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Transform data for Ensemble
+# MAGIC Do assembler transformation before train test split for `VectorIndexer` to work 
+
+# COMMAND ----------
+
+def TransformDataForEnsemble(full_dataset):
+  str_features = ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"] # String features
+
+  # Convert strings to index
+  str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in str_features]
+  cat_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance_Group", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+  target       = ["Dep_Del30"]
+  all_features = cat_features + ["Origin_Activity"]
+  
+  assembler = VectorAssembler(inputCols=all_features, outputCol="features")
+  ensemble_pipeline = Pipeline(stages=str_indexers + [assembler])
+  
+  transformed_data =  (ensemble_pipeline
+          .fit(full_dataset)
+          .transform(full_dataset)
+          .select(["Year", "features"] + target)
+          .withColumnRenamed("Dep_Del30", "label"))
+  
+  # Here, create automatic Categories. All variables > 400 Categories will be treated as Continuous.
+  # else will be treated as Categories by random forest.
+  featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(transformed_data)
+  
+  return featureIndexer, transformed_data
+
+ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
+
+# COMMAND ----------
+
+# Debug - to remove
+ensemble_transformed_data.show(4, truncate=False)
+
+# COMMAND ----------
+
+ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = SplitDataset(ensemble_transformed_data)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Balance the dataset, partition for further training
 
 # COMMAND ----------
 
@@ -810,7 +926,7 @@ def PrepareDatasetForStacking(train, outcomeName, majClass = 0, minClass = 1):
   one_df, one_df_train_ensemble  = train.filter(outcomeName + ' == ' + str(minClass)).randomSplit([0.5, 0.5], 1)
 
   # Construct dataset for voting (ensemble) model
-  train_ensemble = zero_df_train_ensemble.union(one_df_train_ensemble).sample(False, 0.999999999999, 1)
+  train_combiner = zero_df_train_ensemble.union(one_df_train_ensemble).sample(False, 0.999999999999, 1)
 
   # get number of values in minority class
   one_df_count = one_df.count()
@@ -824,35 +940,159 @@ def PrepareDatasetForStacking(train, outcomeName, majClass = 0, minClass = 1):
   # Array of `num_models` datasets
   # below resampling may not be necessary for random forest.
   # Need to remove it in case of performance issues
-  train_models = [a.union(b).sample(False, 0.999999999999, 1) for a, b in zip(zeros_array, ones_array)]
+  train_group = [a.union(b).sample(False, 0.999999999999, 1) for a, b in zip(zeros_array, ones_array)]
   
-  return (train_models, train_ensemble)
+  return (train_combiner, train_group)
 
 # Prepare datasets for stacking
-train_datasets, train_ensemble_dataset = PrepareDatasetForStacking(train, outcomeName)
+train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
+
+# COMMAND ----------
+
+# Debug - to remove
+[[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group]
+
+# COMMAND ----------
+
+# Debug - to remove
+train_group[6].show(4, truncate=False)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Forest of Decision Trees with Dataset Stacking
+# MAGIC #### First level training
 
 # COMMAND ----------
 
-def TrainEnsembleDecisionTrees(train_datasets, train_ensemble_dataset, stages, outcomeName, maxDepth, maxBins):
-  ensemble_model = []
-  for num, df in enumerate(train_datasets):
-    print("Training DecisionTreeClassifier model : " + str(num))
-    TrainDecisionTreeModel(df, stages, outcomeName, maxDepth=maxDepth, maxBins=maxBins)
-    ensemble_model.append(model_dt)
+from pyspark.ml.classification import RandomForestClassifier
+from multiprocessing.pool import ThreadPool
 
-  return ensemble_model
+# allow up to 10 concurrent threads
+pool = ThreadPool(10)
 
-dt_ensemble = 
+# COMMAND ----------
+
+def TrainEnsembleModels(en_train, featureIndexer, classifier) :
+  job = []
+  for num, _ in enumerate(en_train):
+      print("Create ensemble model : " + str(num))      
+      # Chain indexer and classifier in a Pipeline 
+      job.append(Pipeline(stages=[featureIndexer, classifier]))
+      
+  return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
+      
+ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
+                    # Type of model we can use.
+                    RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
+                   )
+print("Training done")
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC #### First level prediction
+
+# COMMAND ----------
+
+def do_ensemble_prediction(em, train_en) :
+    prediction_array = []
+    for num, m in enumerate(em) :
+        print("Run prediction on ensemble model : " + str(num))
+        predictions = em[num].transform(train_en)
+        if num == 0 : prediction_array.append(
+            predictions.select("label").withColumn('ROW_ID', F.monotonically_increasing_id())
+        )      
+        prediction_array.append(predictions
+                                .select(F.col("prediction").alias("prediction_" + str(num)))
+                                .withColumn('ROW_ID', F.monotonically_increasing_id())
+        )
+        #EvaluateModelPredictions(m, predictions, str(num))
+    return prediction_array
+
+ensemble_prediction = do_ensemble_prediction(ensemble_model, train_combiner)
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC #### Assemble and transform data for second level training
+
+# COMMAND ----------
+
+from functools import reduce
+
+def assemble_dataframe(prediction_array) :
+    def do_reduce(df1, df2): return df1.join(df2, "ROW_ID")
+    return reduce(do_reduce, prediction_array).drop("ROW_ID")
+
+def do_transform_final(df) :
+    ensemble_columns = df.schema.names
+    en_target, en_features = ensemble_columns[0], ensemble_columns[1:]
+
+    assembler = VectorAssembler(inputCols=en_features, outputCol="features")
+    pipeline = Pipeline(stages=[assembler])
+    return (pipeline
+            .fit(df)
+            .transform(df)
+            .select(["features"] + [en_target])
+    )
+  
+reduced_df = assemble_dataframe(ensemble_prediction)
+reduced_df.show(2)
+ensemble_transformed = do_transform_final(reduced_df)
+ensemble_transformed.show(2) 
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Forest of Random Forests with Dataset Stacking
+# MAGIC #### Do final training
+
+# COMMAND ----------
+
+def TrainCombiner(data, featureIndexer, classifier):
+  # Chain indexer and forest in a Pipeline
+  pipeline_ensemble = Pipeline(stages=[featureIndexer, classifier])
+
+  # Train model.  This also runs the indexer.
+  return pipeline_ensemble.fit(data)
+
+# Set up VectorIndexer for second level training
+ensemble_featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=3).fit(ensemble_transformed)
+
+# Final ensemble 
+model_trained_ensemble = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
+              RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
+  
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Create final ensemble pipeline
+
+# COMMAND ----------
+
+def FinalEnsmblePipeline(model_comb, model_group, data) :
+  return model_comb.transform(
+    do_transform_final(
+      assemble_dataframe(
+        do_ensemble_prediction(model_group, data)
+      )
+    )
+  )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Model evaluation
+
+# COMMAND ----------
+
+ensemble_test_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_test)
+EvaluateModelPredictions(ensemble_test_prediction, dataName='test')
+
+# COMMAND ----------
+
+ensemble_val_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_val)
+EvaluateModelPredictions(ensemble_val_prediction, dataName='validation')
 
 # COMMAND ----------
 
