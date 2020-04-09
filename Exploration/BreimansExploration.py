@@ -56,10 +56,6 @@ mini_train, train, val, test = SplitDataset(airlines)
 
 # COMMAND ----------
 
-display(test.filter('Year != 2019'))
-
-# COMMAND ----------
-
 import pyspark.sql.functions as F
 from pyspark.sql import Window
 
@@ -101,7 +97,165 @@ for catFeatureName in catFeatureNames:
   test = ApplyBriemansMethod(test, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
   airlines = ApplyBriemansMethod(airlines, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
   
-briFeatureNames = [entry for entry in briemanRanksDict]
+briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Modeling with Brieman's Features
+
+# COMMAND ----------
+
+# Encodes a string column of labels to a column of label indices
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
+# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
+def PrepStringIndexer(stringfeatureNames):
+  return [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in stringfeatureNames]
+
+# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
+# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
+def PrepVectorAssembler(numericalFeatureNames, stringFeatureNames):
+  return VectorAssembler(inputCols = numericalFeatureNames + [f + "_idx" for f in stringFeatureNames], outputCol = "features")
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.ml.feature import VectorIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml import Pipeline
+
+# COMMAND ----------
+
+from pyspark.ml.classification import DecisionTreeClassifier
+
+def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins):
+  # Train Model
+  dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
+  pipeline = Pipeline(stages = stages + [dt])
+  dt_model = pipeline.fit(trainingData)
+  return dt_model
+
+import ast
+import random
+
+# Visualize the decision tree model that was trained in text form
+# Note that the featureNames need to be in the same order they were provided
+# to the vector assembler prior to training the model
+def PrintDecisionTreeModel(model, featureNames):
+  lines = model.toDebugString.split("\n")
+  featuresUsed = set()
+  print("\n")
+  
+  for line in lines:
+    parts = line.split(" ")
+
+    # Replace "feature #" with feature name
+    if ("feature" in line):
+      featureNumIdx = parts.index("(feature") + 1
+      featureNum = int(parts[featureNumIdx])
+      parts[featureNumIdx] = featureNames[featureNum] # replace feature number with actual feature name
+      parts[featureNumIdx - 1] = "" # remove word "feature"
+      featuresUsed.add(featureNames[featureNum])
+      
+    # For cateogrical features, summarize sets of values selected for easier reading
+    if ("in" in parts):
+      setIdx = parts.index("in") + 1
+      vals = ast.literal_eval(parts[setIdx][:-1])
+      vals = list(vals)
+      numVals = len(vals)
+      if (len(vals) > 5):
+        newVals = random.sample(vals, 5)
+        newVals = [str(int(d)) for d in newVals]
+        newVals.append("...")
+        vals = newVals
+      parts[setIdx] = str(vals) + " (" + str(numVals) + " total values)"
+      
+    line = " ".join(parts)
+    print(line)
+    
+  print("\n", "Provided Features: ", featureNames)
+  print("\n", "    Used Features: ", featuresUsed)
+  print("\n")
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Evaluates model predictions for the provided predictions
+# Predictions must have two columns: prediction & label
+def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+  
+def PredictAndEvaluate(model, data, dataName, outcomeName):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName)
+
+# COMMAND ----------
+
+si_base = PrepStringIndexer([])
+va_base = PrepVectorAssembler(numericalFeatureNames = numFeatureNames + briFeatureNames, stringFeatureNames = [])
+
+# COMMAND ----------
+
+model_base = TrainDecisionTreeModel(train, [va_base], outcomeName, maxDepth=8, maxBins=200)
+PrintDecisionTreeModel(model_base.stages[-1], numFeatureNames + briFeatureNames)
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_base, val, "val", outcomeName)
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_base, test, "test", outcomeName)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Sanity Checking Brieman Rankings...
+
+# COMMAND ----------
+
+display(test.filter('Year != 2019'))
 
 # COMMAND ----------
 
