@@ -17,10 +17,17 @@ airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/dat
 # Filter to datset with entries where diverted != 1, cancelled != 1, dep_delay != Null, and arr_delay != Null
 airlines = airlines.where('DIVERTED != 1') \
                    .where('CANCELLED != 1') \
-                   .filter(airlines['DEP_DEL15'].isNotNull()) \
-                   .filter(airlines['ARR_DEL15'].isNotNull())
+                   .filter(airlines['DEP_DEL15'].isNotNull())
 
 print("Number of records in full dataset:", airlines.count())
+
+# Generate other Departure Delay outcome indicators for n minutes
+def CreateNewDepDelayOutcome(data, thresholds):
+  for threshold in thresholds:
+    data = data.withColumn('Dep_Del' + str(threshold), (data['Dep_Delay'] >= threshold).cast('integer'))
+  return data  
+  
+airlines = CreateNewDepDelayOutcome(airlines, [30])
 
 def SplitDataset(model_name):
   # Split airlines data into train, dev, test
@@ -62,7 +69,7 @@ full_data = spark.read.option("header", "true").parquet(f"dbfs/user/team20/full_
 
 # COMMAND ----------
 
-outcomeName = 'Dep_Del15'
+outcomeName = 'Dep_Del30'
 nfeatureNames = [
   # 0        1            2              3              4                5                6               7               8 
   'Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group'
