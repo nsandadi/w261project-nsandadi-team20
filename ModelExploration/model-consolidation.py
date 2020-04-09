@@ -99,26 +99,26 @@ catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 # labelIndexer = [StringIndexer(inputCol=column, outputCol=column+"_INDEX") for column in ['OP_UNIQUE_CARRIER', 'ORIGIN', 'DEST'] ]
 # assembler = VectorAssembler(inputCols = ['YEAR', 'MONTH', 'DAY_OF_MONTH', 'DAY_OF_WEEK','CRS_DEP_TIME', 'CRS_ARR_TIME', 'CRS_ELAPSED_TIME', 'DISTANCE', 'DISTANCE_GROUP', 'OP_UNIQUE_CARRIER_INDEX'], outputCol = "features")
 
-# indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
-# assembler = VectorAssembler(inputCols = numFeatureNames + [cat + "_indexed" for cat in catFeatureNames], outputCol = "features")
-# lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
-# pipeline = Pipeline(stages=indexers + [assembler,lr])
-# tr_model=pipeline.fit(mini_train_algo)
+indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
+assembler = VectorAssembler(inputCols = numFeatureNames + [cat + "_indexed" for cat in catFeatureNames], outputCol = "features")
+lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
+pipeline = Pipeline(stages=indexers + [assembler,lr])
+tr_model=pipeline.fit(mini_train_algo)
 
 # COMMAND ----------
 
 # take the train dataset and subset to the features in numFeatureNames & catFeatureNames
 # outcomeName + numFeatureNames + catFeatureNames
 
-def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
+def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
-    indexers = [ StringIndexer(inputCol=c, outputCol="{0}_indexed".format(c))
-                 for c in categoricalCols ]
+    indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
 
     # default setting: dropLast=True
     encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
                  outputCol="{0}_encoded".format(indexer.getOutputCol()))
                  for indexer in indexers ]
+    
     # If it si svm do hot encoding
     if svmflag == True:
       assembler = VectorAssembler(inputCols=[encoder.getOutputCol() for encoder in encoders]
@@ -128,19 +128,19 @@ def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
       assembler = VectorAssembler(inputCols = continuousCols + [cat + "_indexed" for cat in categoricalCols], outputCol = "features")
       
     # choose the appropriate model regression  
-    if model == 'lr':
+    if algorithm == 'lr':
       lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
       pipeline = Pipeline(stages=indexers + [assembler,lr])
 
-    elif model == 'dt':
+    elif algorithm == 'dt':
       dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366)
       pipeline = Pipeline(stages=indexers + [assembler,dt])
       
-    elif model == 'nb':
+    elif algorithm == 'nb':
       nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
       pipeline = Pipeline(stages=indexers + [assembler,nb])
       
-    elif model == 'svm':
+    elif algorithm == 'svm':
       svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
       pipeline = Pipeline(stages=indexers + encoders + [assembler,svc])
       
@@ -153,13 +153,22 @@ def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
 
 # COMMAND ----------
 
-model = 'svm'
-tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+def PredictAndEvaluate(model, data, dataName, outcomeName, algorithm):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
 
-model = 'lr'
-tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+dataName = 'mini_train'
+algorithms = ['lr','dt','nb']
+for algorithm in algorithms:
+  if algorithm == 'svm':
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
+  else:
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    predictions = tr_model.transform(val_algo)
+    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
 
@@ -168,70 +177,21 @@ display(predictions.take(10))
 
 # COMMAND ----------
 
-evaluator = BinaryClassificationEvaluator()
-print("Test Area Under ROC: " + str(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
-
-# COMMAND ----------
-
-# Use BinaryClassificationEvaluator to evaluate our model
-evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
-# Evaluate the model on training datasets
-auc = evaluator.evaluate(predictions)
-print("AUC:\t\t", auc)
-
-
-# COMMAND ----------
-
-# Model Evaluation
-
-evaluator = BinaryClassificationEvaluator(labelCol = "label", rawPredictionCol = "prediction", metricName = "areaUnderPR")
-areaUnderPR = evaluator.evaluate(predictions)
-print("PR:\t\t", PR)
-evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
-accuracy = evaluator.evaluate(predictions)
-print("Accuracy:\t", accuracy)
-
-# COMMAND ----------
-
-dataName = 'mini_train'
-EvaluateModelPredictions(tr_model, val, dataName, outcomeName)
-
-# COMMAND ----------
-
-#     data = model.transform(df)
-
-#     data = data.withColumn('label',col(labelCol))
-models = ['lr','dt','nb','svm']
-for model in models:
-  if model == 'svm':
-    tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
-    PredictAndEvaluate(tr_model, val, dataName='Linear '+ model, outcomeName)
-  else:
-    tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-    PredictAndEvaluate(tr_model, data, dataName=model + 'Regression', outcomeName)
-
-# model = train_model(mini_train_algo,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-data = model.transform(val)
-display(data.take(10))
-
-# COMMAND ----------
-
 # Model Evaluation
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 
 
-def EvaluateModelPredictions(model, data, dataName, outcomeName):
+def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
   # Make predictions on test data to measure the performance of the model
-  predictions = model.transform(data)
   
-  print("\nModel Evaluation - ", dataName)
+  print(f'\nModel Evaluation - {dataName} for {algoName}', )
   print("------------------------------------------")
 
   # Accuracy
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
   accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t", accuracy)
+  print("Accuracy:\t\t", accuracy)
 
   # Recall
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
@@ -249,18 +209,37 @@ def EvaluateModelPredictions(model, data, dataName, outcomeName):
   print("F1:\t\t", f1)
 
   # Precision-Recall
-  evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
+  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
   PR = evaluator.evaluate(predictions)
-  print("PR:\t\t", PR)
+  print("Precision-Recall:\t", PR)
   
   # Are under the curve
-  evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
+  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
   AUC = evaluator.evaluate(predictions)
-  print("AUC:\t\t", AUC)
+  print("Area-Under-Curve:\t", AUC)
 
 
 # COMMAND ----------
 
-def PredictAndEvaluate(model, data, dataName, outcomeName):
-  predictions = model.transform(data)
-  EvaluateModelPredictions(predictions, dataName, outcomeName)
+# model = train_model(mini_train_algo,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+data = model.transform(val)
+display(data.take(10))
+
+# COMMAND ----------
+
+model = 'lr'
+tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+
+# COMMAND ----------
+
+model = 'svm'
+tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
+
+# COMMAND ----------
+
+predictions = tr_model.transform(val_algo)
+display(predictions.take(10))
+
+# COMMAND ----------
+
