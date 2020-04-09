@@ -25,6 +25,11 @@
 
 # COMMAND ----------
 
+# MAGIC %sh 
+# MAGIC pip install plotly --upgrade
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.ml.feature import VectorIndexer
@@ -32,6 +37,12 @@ from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.feature import StringIndexer
 from pyspark.ml import Pipeline
 
+# COMMAND ----------
+
+from plotly.offline import plot
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 # COMMAND ----------
 
@@ -377,6 +388,7 @@ import datetime as dt
 def AddHolidayFeature(df):
   if ('Holiday' in df.columns):
       print("Variable 'Holiday' already exists")
+      return df
   
   # Import dataset of government holidays
   holiday_df_raw = spark.read.csv("dbfs:/user/shajikk@ischool.berkeley.edu/scratch/" + 'holidays.csv').toPandas()
@@ -448,6 +460,7 @@ display(airlines.take(1000))
 def AddOriginActivityFeature(df):
   if ('Origin_Activity' in df.columns):
       print("Variable 'Origin_Activity' already exists")
+      return df
   
   # Construct a flight bucket attribute to group flights occuring on the same day in the same time block originating from the same airport
   # Compute aggregated statistics for these flight buckets
@@ -542,6 +555,12 @@ print(" - Origin Activity Feature: \t", orgFeatureNames)
 
 # COMMAND ----------
 
+# - Numerical Features: 		 ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+# - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
+# take the train dataset and subset to the features in numFeatureNames & catFeatureNames
+# outcomeName + numFeatureNames + catFeatureNames
+train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
+val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
 
 
 # COMMAND ----------
@@ -796,7 +815,6 @@ def PrintDecisionTreeModel(model, featureNames):
   featuresUsed = set()
   print("\n")
   
-  
   for line in lines:
     parts = line.split(" ")
 
@@ -865,6 +883,16 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC Stacking is a general framework that involves training a learning algorithm to combine the predictions of several other learning algorithms to make a final prediction. Stacking can be used to handle an imbalanced dataset. The steps can be outlined as below.  
+# MAGIC (a) Group the **training** data into majority and minority class.   
+# MAGIC (b) Split the  majority class into \\(N + 1\\) groups, each group containing same number of data points as that in minority class.    
+# MAGIC (c) Create \\(N + 1\\) datasets for training by combining the each group from (b) with minority class from (a). Each of these groups will be balanced.  
+# MAGIC (d) Use \\(N\\) datasets from (c) to train the first level classifier. Once the models are generated, use the remaing one dataset from (c) to generate predictions for each of these models. These \\(N\\) predictions are the features for the second level classifier. The target/label value for the second level classifier is the target/label value of this remaining dataset.  
+# MAGIC (e) Train the second level classifier. A final pipeline can be created by combining the models.  
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Transform data for Ensemble
 # MAGIC Do assembler transformation before train test split for `VectorIndexer` to work 
@@ -893,9 +921,9 @@ def TransformDataForEnsemble(full_dataset):
   # else will be treated as Categories by random forest.
   featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(transformed_data)
   
-  return featureIndexer, transformed_data
+  return all_features, featureIndexer, transformed_data
 
-ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
+all_ensemble_features, ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
 
 # COMMAND ----------
 
@@ -917,30 +945,30 @@ def PrepareDatasetForStacking(train, outcomeName, majClass = 0, minClass = 1):
   # Determine distribution of dataset for each outcome value (zero & one)
   ones, zeros = train.groupBy(outcomeName).count().sort(train[outcomeName].desc()).toPandas()["count"].to_list()
 
-  # Set number of models & number of datasets (2 more than ratio majority to minority class)
-  num_models = int(zeros/ones) + 2
-  print("Number of models : " + str(num_models))
+  # Set number of models & number of datasets (3 more than ratio majority to minority class)
+  # last split use to train level 2 classifier
+  num_splits = int(zeros/ones) + 3
+  print("Number of splits : " + str(num_splits))
   
   # Split dataset for training individual modesl and for training the voting (ensemble) model
-  zero_df, zero_df_train_ensemble = train.filter(outcomeName + ' == ' + str(majClass)).randomSplit([0.5, 0.5], 1)
-  one_df, one_df_train_ensemble  = train.filter(outcomeName + ' == ' + str(minClass)).randomSplit([0.5, 0.5], 1)
-
-  # Construct dataset for voting (ensemble) model
-  train_combiner = zero_df_train_ensemble.union(one_df_train_ensemble).sample(False, 0.999999999999, 1)
+  zero_df = train.filter(outcomeName + ' == ' + str(majClass))
+  one_df  = train.filter(outcomeName + ' == ' + str(minClass))
 
   # get number of values in minority class
   one_df_count = one_df.count()
-  print("Minority Class Size: ", one_df_count)
   
-  zeros_array = zero_df.randomSplit([1.0] * num_models, 1)
+  zeros_array = zero_df.randomSplit([1.0] * num_splits, 1)
   zeros_array_count = [s.count() for s in zeros_array]
   ones_array = [one_df.sample(False, min(0.999999999999, r/one_df_count), 1) for r in zeros_array_count]
   ones_array_count = [s.count() for s in ones_array]
 
   # Array of `num_models` datasets
-  # below resampling may not be necessary for random forest.
+  # below resampling (shuffling) may not be necessary for random forest.
   # Need to remove it in case of performance issues
-  train_group = [a.union(b).sample(False, 0.999999999999, 1) for a, b in zip(zeros_array, ones_array)]
+  train_group = [a.union(b).sample(False, 0.999999999999, 1) for a, b in zip(zeros_array[0:-1], ones_array[0:-1])]
+  
+  # Construct dataset for voting (ensemble) model
+  train_combiner = zeros_array[-1].union(ones_array[-1]).sample(False, 0.999999999999, 1) # Shuffle
   
   return (train_combiner, train_group)
 
@@ -955,12 +983,22 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 # COMMAND ----------
 
 # Debug - to remove
+train_combiner.groupBy('label').count().toPandas()["count"].to_list()
+
+# COMMAND ----------
+
+# Debug - to remove
 train_group[6].show(4, truncate=False)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### First level training
+# MAGIC #### Train first-level classifiers
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Each of the first level classifier can be trained parallelly. Concurrency is obtained by using Python's ThreadPool utility, which triggers training of various models over many workers.
 
 # COMMAND ----------
 
@@ -989,8 +1027,53 @@ print("Training done")
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC #### Visualize feature importance for individual ensembles
+# MAGIC 
+# MAGIC Each feature's importance is the average of its importance across all trees in the ensemble. The importance vector is normalized to sum to 1.  
+# MAGIC Reference : https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/classification/RandomForestClassifier.scala
+
+# COMMAND ----------
+
+from collections import defaultdict
+
+def makedict(em, columns, features):
+    plot = defaultdict(dict)
+    rows = int(len(em)/columns)
+    for num, m in enumerate(em):
+        plot[num]['importance'] = list(m.stages[-1].featureImportances.toArray())
+        plot[num]['features']   = features
+        plot[num]['x_pos']      = int(num/columns)+1
+        plot[num]['y_pos']      = num%columns+1
+        plot[num]['title']      = "ensemble model {}".format(num)
+    return plot, rows, columns
+
+plt, rows, columns = makedict(ensemble_model, columns=3, features=all_ensemble_features)
+
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
+
+for key, value in plt.items() :
+    fig.add_trace(go.Bar(
+      x=plt[key]['features'],
+      y=plt[key]['importance'],
+      marker_color=list(map(lambda x: px.colors.sequential.Plasma[x], range(0,len(plt[key]['features'])))),
+      name = '',
+      showlegend = False,
+    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(tickangle=-45)
+    
+fig.update_layout(height=1000, width=1000, title_text="Feature importance for individual ensembles")
+fig.update_layout(xaxis_tickangle=-45)
+fig.show()
+
+# COMMAND ----------
+
 # MAGIC %md 
-# MAGIC #### First level prediction
+# MAGIC #### Construct a new data set based on the output of base classifiers
 
 # COMMAND ----------
 
@@ -1015,6 +1098,11 @@ ensemble_prediction = do_ensemble_prediction(ensemble_model, train_combiner)
 
 # MAGIC %md 
 # MAGIC #### Assemble and transform data for second level training
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The resulting array of dataframes is reduced into a single dataframe by iteratively joining over.
 
 # COMMAND ----------
 
@@ -1044,7 +1132,7 @@ ensemble_transformed.show(2)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Do final training
+# MAGIC #### Learn a second-level classifier based on training set from first-level.
 
 # COMMAND ----------
 
