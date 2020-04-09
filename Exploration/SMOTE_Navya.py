@@ -355,7 +355,7 @@ balanced_train_cols_dest.count()
 
 # COMMAND ----------
 
-# IndexToString - Reverse of StringIndexer
+# IndexToString - Reverse of StringIndexer - Can use only on the same dataset
 def reverseStringIndexer(df):
   
   indexers = [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in catFeatureNames]
@@ -391,11 +391,6 @@ smoted_train_data = WriteAndRefDataToParquet(balanced_train_cols_dest, 'smoted_t
 
 # MAGIC %md
 # MAGIC ### Load the dataset to dataframe
-
-# COMMAND ----------
-
-# Load the data into dataframe
-smoted = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_balanced_train_data.parquet")
 
 # COMMAND ----------
 
@@ -441,10 +436,6 @@ display(smoted_train.groupby('DEP_DEL30').count())
 
 train_delay = train.filter(train.DEP_DEL30 == 1)
 smoted_train_delay = smoted_train.filter(smoted_train.DEP_DEL30 == 1)
-
-# COMMAND ----------
-
-smoted_train_delay.printSchema()
 
 # COMMAND ----------
 
