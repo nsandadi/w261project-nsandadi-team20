@@ -559,87 +559,81 @@ print(" - Origin Activity Feature: \t", orgFeatureNames)
 # - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
 # take the train dataset and subset to the features in numFeatureNames & catFeatureNames
 # outcomeName + numFeatureNames + catFeatureNames
+mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + catFeatureNames)
+
 train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
 val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
+
+# Define outcome & features to use in model development
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] 
 
 
 # COMMAND ----------
 
-# - Numerical Features: 		 ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
-# - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
 # take the train dataset and subset to the features in numFeatureNames & catFeatureNames
 # outcomeName + numFeatureNames + catFeatureNames
-train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
-val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
 
+def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
-# Encodes a string column of labels to a column of label indices
-# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
-# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
-si = [StringIndexer(inputCol=column, outputCol=column+"_idx", handleInvalid="keep") for column in catFeatureNames]
+    indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
 
-# One hot Encode outputs
-# oh_encoder     = OneHotEncoderEstimator(inputCols=cat_columns, outputCols=all_outputCols)
-
-encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
+    # default setting: dropLast=True
+    encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
                  outputCol="{0}_encoded".format(indexer.getOutputCol()))
-                 for indexer in si ]
+                 for indexer in indexers ]
+    
+    # If it si svm do hot encoding
+    if svmflag == True:
+      assembler = VectorAssembler(inputCols=[encoder.getOutputCol() for encoder in encoders]
+                                + continuousCols, outputCol="features")
+    # else skip it
+    else:
+      assembler = VectorAssembler(inputCols = continuousCols + [cat + "_indexed" for cat in categoricalCols], outputCol = "features")
+      
+    # choose the appropriate model regression  
+    if algorithm == 'lr':
+      lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
+      pipeline = Pipeline(stages=indexers + [assembler,lr])
 
-# Use VectorAssembler() to merge our feature columns into a single vector column, which will be passed into the model. 
-# We will not transform the dataset just yet as we will be passing the VectorAssembler into our ML Pipeline.
-va = VectorAssembler(inputCols = numFeatureNames + [cat + "_idx" for cat in catFeatureNames], outputCol = "features")
+    elif algorithm == 'dt':
+      dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366)
+      pipeline = Pipeline(stages=indexers + [assembler,dt])
+      
+    elif algorithm == 'nb':
+      nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
+      pipeline = Pipeline(stages=indexers + [assembler,nb])
+      
+    elif algorithm == 'svm':
+      svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
+      pipeline = Pipeline(stages=indexers + encoders + [assembler,svc])
+      
+    else:
+      pass
+    
+    tr_model=pipeline.fit(df)
 
-# Define Logistic regression
-lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0) 
-
-# Define Decision Tree Regression
-dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366) 
-
-# Naive Bayes Regression
-nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
-
-# svm 
-svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
-
-
-# Create our pipeline stages logistic regression
-pipeline = Pipeline(stages=indexers + [va, lr])
-
-# Create our pipeline stages decision tree
-pipeline = Pipeline(stages=indexers + [va, dt])
-
-# Create our pipeline stages logistic regression
-pipeline = Pipeline(stages=indexers + [va, nb])
-
-# Support Vector Machines
-pipeline = Pipeline(stages=indexers + encoder + [va, svc])
-
-# Run stages in pipeline and train the model
-lr_model = pipeline.fit(train_algo)
-
-# View the Decision Tree Model
-dt_model = pipeline.fit(train_algo)
-
-# Run stages in pipeline and train the model
-nb_model = pipeline.fit(train_algo)
-
-# Fit the model
-lin_svc_model = pipeline.fit(train_algo)
+    return tr_model
 
 # COMMAND ----------
 
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+def PredictAndEvaluate(model, data, dataName, outcomeName, algorithm):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName, algorithm)
 
-# Evaluates model predictions for the provided predictions
-# Predictions must have two columns: prediction & label
-def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
-  print("\nModel Evaluation - ", dataName)
+# COMMAND ----------
+
+def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
+  # Make predictions on test data to measure the performance of the model
+  
+  print(f'\nModel Evaluation - {dataName} for {algoName}', )
   print("------------------------------------------")
 
   # Accuracy
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
   accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t", accuracy)
+  print("Accuracy:\t\t", accuracy)
 
   # Recall
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
@@ -656,11 +650,29 @@ def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):
   f1 = evaluator.evaluate(predictions)
   print("F1:\t\t", f1)
 
+  # Precision-Recall
+  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
+  PR = evaluator.evaluate(predictions)
+  print("Precision-Recall:\t", PR)
+  
+  # Are under the curve
+  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
+  AUC = evaluator.evaluate(predictions)
+  print("Area-Under-Curve:\t", AUC)
+
+
 # COMMAND ----------
 
-def PredictAndEvaluate(model, data, dataName, outcomeName):
-  predictions = model.transform(data)
-  EvaluateModelPredictions(predictions, dataName, outcomeName)
+dataName = 'mini_train'
+algorithms = ['lr','dt','nb','svm']
+for algorithm in algorithms:
+  if algorithm == 'svm':
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
+  else:
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    predictions = tr_model.transform(val_algo)
+    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
 
@@ -715,15 +727,25 @@ outcomeName = 'Dep_Del30'
 # COMMAND ----------
 
 # Build the toy example dataset from the cleaned and transformed mini training set
-toy_dataset = mini_train.select(['Dep_Del30', 'Year', 'Month', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin_Dest', 'Op_Unique_Carrier']) \
+toy_dataset = mini_train.select(['Dep_Del30', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin', 'Op_Unique_Carrier']) \
                         .filter(mini_train['Dep_Del30'] == 0) \
-                        .sample(False, 0.00252, 8)
+                        .sample(False, 0.0039, 8)
 
-toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Year', 'Month', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin_Dest', 'Op_Unique_Carrier']) \
+toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin', 'Op_Unique_Carrier']) \
                          .filter(mini_train['Dep_Del30'] == 1) \
-                         .sample(False, 0.005, 8))
+                         .sample(False, 0.025, 8))
 
 display(toy_dataset)
+
+# COMMAND ----------
+
+# Save the toy example dataset
+toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Decision trees create a model that predicts the label (or class) by evaluating a set of rules that follow an IF-THEN-ELSE pattern. The questions are the nodes, and the answers (true or false) are the branches in the tree to the child nodes. A decision tree model estimates the minimum number of true/false questions needed, to assess the probability of making a correct decision. 
 
 # COMMAND ----------
 
@@ -764,6 +786,10 @@ display(toy_dataset)
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ##### Math / Decision Tree Learning
 
@@ -771,6 +797,10 @@ display(toy_dataset)
 
 # MAGIC %md
 # MAGIC ##### View of tree building / completed tree
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
