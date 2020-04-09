@@ -5,6 +5,15 @@ from pyspark.ml.feature import VectorIndexer
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.feature import StringIndexer
 from pyspark.ml import Pipeline
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
+from pyspark.sql.functions import col
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.classification import NaiveBayes
+from pyspark.ml.classification import LinearSVC
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
 
 # COMMAND ----------
 
@@ -87,18 +96,21 @@ catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 
 # COMMAND ----------
 
+# labelIndexer = [StringIndexer(inputCol=column, outputCol=column+"_INDEX") for column in ['OP_UNIQUE_CARRIER', 'ORIGIN', 'DEST'] ]
+# assembler = VectorAssembler(inputCols = ['YEAR', 'MONTH', 'DAY_OF_MONTH', 'DAY_OF_WEEK','CRS_DEP_TIME', 'CRS_ARR_TIME', 'CRS_ELAPSED_TIME', 'DISTANCE', 'DISTANCE_GROUP', 'OP_UNIQUE_CARRIER_INDEX'], outputCol = "features")
+
+# indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
+# assembler = VectorAssembler(inputCols = numFeatureNames + [cat + "_indexed" for cat in catFeatureNames], outputCol = "features")
+# lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
+# pipeline = Pipeline(stages=indexers + [assembler,lr])
+# tr_model=pipeline.fit(mini_train_algo)
+
+# COMMAND ----------
+
 # take the train dataset and subset to the features in numFeatureNames & catFeatureNames
 # outcomeName + numFeatureNames + catFeatureNames
 
 def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
-
-    from pyspark.ml import Pipeline
-    from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
-    from pyspark.sql.functions import col
-    from pyspark.ml.classification import LogisticRegression
-    from pyspark.ml.classification import DecisionTreeClassifier
-    from pyspark.ml.classification import NaiveBayes
-    from pyspark.ml.classification import LinearSVC
 
     indexers = [ StringIndexer(inputCol=c, outputCol="{0}_indexed".format(c))
                  for c in categoricalCols ]
@@ -114,20 +126,19 @@ def train_model(df,model,categoricalCols,continuousCols,labelCol,svmflag):
     # else skip it
     else:
       assembler = VectorAssembler(inputCols = continuousCols + [cat + "_indexed" for cat in categoricalCols], outputCol = "features")
-      pipeline = Pipeline(stages=indexers + [assembler])
       
     # choose the appropriate model regression  
     if model == 'lr':
       lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
-      pipeline = Pipeline(stages=indexers + encoders + [assembler,lr])
+      pipeline = Pipeline(stages=indexers + [assembler,lr])
 
     elif model == 'dt':
       dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = 8, maxBins=366)
-      pipeline = Pipeline(stages=indexers + encoders + [assembler,dt])
+      pipeline = Pipeline(stages=indexers + [assembler,dt])
       
     elif model == 'nb':
       nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
-      pipeline = Pipeline(stages=indexers + encoders + [assembler,nb])
+      pipeline = Pipeline(stages=indexers + [assembler,nb])
       
     elif model == 'svm':
       svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
@@ -147,6 +158,46 @@ tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,out
 
 # COMMAND ----------
 
+model = 'lr'
+tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+
+# COMMAND ----------
+
+predictions = tr_model.transform(val_algo)
+display(predictions.take(10))
+
+# COMMAND ----------
+
+evaluator = BinaryClassificationEvaluator()
+print("Test Area Under ROC: " + str(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
+
+# COMMAND ----------
+
+# Use BinaryClassificationEvaluator to evaluate our model
+evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
+# Evaluate the model on training datasets
+auc = evaluator.evaluate(predictions)
+print("AUC:\t\t", auc)
+
+
+# COMMAND ----------
+
+# Model Evaluation
+
+evaluator = BinaryClassificationEvaluator(labelCol = "label", rawPredictionCol = "prediction", metricName = "areaUnderPR")
+areaUnderPR = evaluator.evaluate(predictions)
+print("PR:\t\t", PR)
+evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+accuracy = evaluator.evaluate(predictions)
+print("Accuracy:\t", accuracy)
+
+# COMMAND ----------
+
+dataName = 'mini_train'
+EvaluateModelPredictions(tr_model, val, dataName, outcomeName)
+
+# COMMAND ----------
+
 #     data = model.transform(df)
 
 #     data = data.withColumn('label',col(labelCol))
@@ -154,14 +205,59 @@ models = ['lr','dt','nb','svm']
 for model in models:
   if model == 'svm':
     tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
-    PredictAndEvaluate(tr_model, val, dataName='Linear'+ model, outcomeName)
+    PredictAndEvaluate(tr_model, val, dataName='Linear '+ model, outcomeName)
   else:
     tr_model = train_model(mini_train_algo,model,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-    PredictAndEvaluate(tr_model, data, dataName, outcomeName)
+    PredictAndEvaluate(tr_model, data, dataName=model + 'Regression', outcomeName)
 
 # model = train_model(mini_train_algo,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
 data = model.transform(val)
 display(data.take(10))
+
+# COMMAND ----------
+
+# Model Evaluation
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+
+
+def EvaluateModelPredictions(model, data, dataName, outcomeName):
+  # Make predictions on test data to measure the performance of the model
+  predictions = model.transform(data)
+  
+  print("\nModel Evaluation - ", dataName)
+  print("------------------------------------------")
+
+  # Accuracy
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
+  accuracy = evaluator.evaluate(predictions)
+  print("Accuracy:\t", accuracy)
+
+  # Recall
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
+  recall = evaluator.evaluate(predictions)
+  print("Recall:\t\t", recall)
+
+  # Precision
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
+  precision = evaluator.evaluate(predictions)
+  print("Precision:\t", precision)
+
+  # F1
+  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
+  f1 = evaluator.evaluate(predictions)
+  print("F1:\t\t", f1)
+
+  # Precision-Recall
+  evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
+  PR = evaluator.evaluate(predictions)
+  print("PR:\t\t", PR)
+  
+  # Are under the curve
+  evaluator = BinaryClassificationEvaluator(labelCol = "Dep_Del30", rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
+  AUC = evaluator.evaluate(predictions)
+  print("AUC:\t\t", AUC)
+
 
 # COMMAND ----------
 
