@@ -146,7 +146,51 @@ display(airlines.take(6))
 
 # COMMAND ----------
 
+# Helper function for Group 3 graphs that plot the probability of outcome on the x axis, the number of flights on the x axis
+# With entries for each distinct value of the feature as separate bars.
 
+def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
+  # Filter out just to rows with delays or no delays
+  d_delay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
+  d_nodelay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
+
+  # Join tables to get probabilities of departure delay for each table
+  probs = d_delay.join(d_nodelay, d_delay[var] == d_nodelay[var]) \
+             .select(d_delay[var], (d_delay["count"]).alias("DelayCount"), (d_nodelay["count"]).alias("NoDelayCount"), \
+                     (d_delay["count"] / (d_delay["count"] + d_nodelay["count"])).alias("Prob_" + outcomeName))
+
+  # Join back with original data to get 0/1 labeling with probablities of departure delay as attribute of airlines
+  d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count()
+  d = d.join(probs, full_data_dep[var] == probs[var]) \
+       .select(d[var], d[outcomeName], d["count"], probs["Prob_" + outcomeName]) \
+       .orderBy("Prob_" + outcomeName, outcomeName).toPandas()
+  d = d.round({'Prob_' + outcomeName: numDecimals})
+
+  t1 = go.Bar(
+    x = d[d[outcomeName] == 0.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 0.0]["count"],
+    name=outcomeName + " = " + str(0.0),
+    text=d[d[outcomeName] == 0.0][var]
+  )
+  t2 = go.Bar(
+    x = d[d[outcomeName] == 1.0]["Prob_" + outcomeName],
+    y = d[d[outcomeName] == 1.0]["count"],
+    name=outcomeName + " = " + str(1.0),
+    text=d[d[outcomeName] == 1.0][var]
+  )
+
+  l = go.Layout(
+    barmode='stack', 
+    title="Flight Counts by " + "Prob_" + outcomeName + " & " + outcomeName + " for each " + var,
+    xaxis=dict(title="Prob_" + outcomeName + " (Note: axis type = " + xtype + ")", type=xtype),
+    yaxis=dict(title="Number of Flights")
+  )
+  fig = go.Figure(data=[t1, t2], layout=l)
+  fig.show()
+  
+# Plot Carrier and outcome with bar plots of probability on x axis
+# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
+MakeProbBarChart(train, outcomeName, "Op_Unique_Carrier", xtype='linear', numDecimals=4)
 
 # COMMAND ----------
 
@@ -822,7 +866,7 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # MAGIC The general formula for entropy is:
 # MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$
 # MAGIC 
-# MAGIC Since our dataset has a binary classification, all the observations fall into two classes. Suppose we have a set of N observations in the dataset. Let's assume that n observations have label 1 and m = N - n observations have label 0. The ratios p and q are given by:
+# MAGIC Since our dataset has a binary classification, all the observations fall into one of two classes. Suppose we have a set of N observations in the dataset. Let's assume that n observations have label 1 and m = N - n observations have label 0. p and q, the ratios of elements of each label in the dataset are given by:
 # MAGIC 
 # MAGIC $$p = \frac{n}{N}$$ $$q = \frac{m}{N} = 1-p $$
 # MAGIC 
