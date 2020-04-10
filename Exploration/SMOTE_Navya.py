@@ -240,7 +240,7 @@ def SmoteSampling(vectorized, k = 5, minorityClass = 1, majorityClass = 0, sampl
 # COMMAND ----------
 
 # Applying SMOTE on train dataset 
-balanced_train = SmoteSampling(vectorized, k = 7, minorityClass = 1, majorityClass = 0, sample_size = 0.0005)
+balanced_train = SmoteSampling(vectorized, k = 7, minorityClass = 1, majorityClass = 0, sample_size = 0.005)
 
 
 # COMMAND ----------
@@ -355,6 +355,10 @@ balanced_train_cols_dest.count()
 
 # COMMAND ----------
 
+balanced_train_cols_dest.take(2)
+
+# COMMAND ----------
+
 # IndexToString - Reverse of StringIndexer - Can use only on the same dataset
 def reverseStringIndexer(df):
   
@@ -385,12 +389,17 @@ def WriteAndRefDataToParquet(data, dataName):
 
 # COMMAND ----------
 
-smoted_train_data = WriteAndRefDataToParquet(balanced_train_cols_dest, 'smoted_train_data')
+smoted_train_005 = WriteAndRefDataToParquet(balanced_train_cols_dest, 'smoted_train_005')
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Load the dataset to dataframe
+
+# COMMAND ----------
+
+# Load the data into dataframe
+smoted_train_005 = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_smoted_train_005.parquet")
 
 # COMMAND ----------
 
@@ -407,7 +416,7 @@ smoted_train.count()
 
 # COMMAND ----------
 
-display(smoted_train.groupby('DEP_DEL30').count())
+smoted_train_005.count()
 
 # COMMAND ----------
 
@@ -429,6 +438,10 @@ display(smoted_train.groupby('DEP_DEL30').count())
 
 # COMMAND ----------
 
+display(smoted_train_005.groupby('DEP_DEL30').count())
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Filtering out delayed data within train and smoted_train
 
@@ -436,6 +449,7 @@ display(smoted_train.groupby('DEP_DEL30').count())
 
 train_delay = train.filter(train.DEP_DEL30 == 1)
 smoted_train_delay = smoted_train.filter(smoted_train.DEP_DEL30 == 1)
+smoted_train_005_delay = smoted_train_005.filter(smoted_train_005.DEP_DEL30 == 1)
 
 # COMMAND ----------
 
@@ -448,6 +462,10 @@ display(train_delay.groupby('OP_UNIQUE_CARRIER').count())
 
 # COMMAND ----------
 
+display(smoted_train_005_delay.groupby('OP_UNIQUE_CARRIER').count())
+
+# COMMAND ----------
+
 display(smoted_train_delay.groupby('OP_UNIQUE_CARRIER').count())
 
 # COMMAND ----------
@@ -457,11 +475,15 @@ display(smoted_train_delay.groupby('OP_UNIQUE_CARRIER').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('ORIGIN').count())
+display(train_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('ORIGIN').count())
+display(smoted_train_005_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
@@ -470,11 +492,15 @@ display(smoted_train_delay.groupby('ORIGIN').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('DEST').count())
+display(train_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('DEST').count())
+display(smoted_train_005_delay.groupby('DEST').count().orderBy('DEST'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
@@ -483,11 +509,15 @@ display(smoted_train_delay.groupby('DEST').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('DISTANCE_GROUP').count())
+display(train_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('DISTANCE_GROUP').count())
+display(smoted_train_005_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
@@ -496,11 +526,15 @@ display(smoted_train_delay.groupby('DISTANCE_GROUP').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('DISTANCE').count())
+display(train_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('DISTANCE').count())
+display(smoted_train_005_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
@@ -548,11 +582,15 @@ display(smoted_train_delay.groupby('CRS_ELAPSED_TIME').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('YEAR').count())
+display(train_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('YEAR').count())
+display(smoted_train_005_delay.groupby('YEAR').count().orderBy('YEAR'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
@@ -561,11 +599,15 @@ display(smoted_train_delay.groupby('YEAR').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('MONTH').count())
+display(train_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('MONTH').count())
+display(smoted_train_005_delay.groupby('MONTH').count().orderBy('MONTH'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
@@ -574,11 +616,15 @@ display(smoted_train_delay.groupby('MONTH').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('DAY_OF_MONTH').count())
+display(train_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('DAY_OF_MONTH').count())
+display(smoted_train_005_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
@@ -587,8 +633,12 @@ display(smoted_train_delay.groupby('DAY_OF_MONTH').count())
 
 # COMMAND ----------
 
-display(train_delay.groupby('DAY_OF_WEEK').count())
+display(train_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
 
 # COMMAND ----------
 
-display(smoted_train_delay.groupby('DAY_OF_WEEK').count())
+display(smoted_train_005_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
+
+# COMMAND ----------
+
+display(smoted_train_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
