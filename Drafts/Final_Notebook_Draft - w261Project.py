@@ -890,20 +890,28 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 
 # MAGIC %md
 # MAGIC ##### Building the decision tree 
-
-# COMMAND ----------
-
-# MAGIC %md
+# MAGIC 
 # MAGIC In our toy dataset, we have ten observations. Four of them have label 1 and six of them have label 0. Thus, entropy at the root node is given by:
 # MAGIC 
 # MAGIC $$ Entropy = -\frac{4}{10} {\log_2 (\frac{4}{10})} -\frac{6}{10} {\log_2 (\frac{6}{10})} = 0.966 $$
 # MAGIC 
-# MAGIC Entropy is close to 1 as we have a distribution close to 50/50 for the observations.
+# MAGIC Entropy is close to 1 as we have a distribution close to 50/50 for the observations belonging to each class.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Insert picture of tree here.
+# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on this attribute. We add the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Insert picture of tree here.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Information gain (or entropy / uncertainity reduction) at child node is calculated as 
+# MAGIC $$ G = Entropy (parent) - Entropy (child) $$
 
 # COMMAND ----------
 
