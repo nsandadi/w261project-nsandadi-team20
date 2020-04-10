@@ -146,6 +146,10 @@ display(airlines.take(6))
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### EDA Task #3: Unbalanced Dataset
 # MAGIC * Show how dataset is drastically unbalanced (especially as you increase the dep_delay threshold)
@@ -832,7 +836,8 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 
 # COMMAND ----------
 
-
+# MAGIC %md
+# MAGIC Insert picture of tree here.
 
 # COMMAND ----------
 
