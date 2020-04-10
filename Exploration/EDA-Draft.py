@@ -468,7 +468,7 @@ display(d)
 # Plot Carrier and outcome with bar plots of probability on x axis
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
 var = "Op_Unique_Carrier"  
-MakeProbBarChart(full_data_dep, outcomeName, var, xtype='linear', numDecimals=4)
+MakeProbBarChart(full_data_dep, outcomeName, var, xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
@@ -672,7 +672,6 @@ MakeProbBarChart(d, outcomeName, binnedVar + "label", xtype='category', numDecim
 
 # Plot Day_Of_Month interacted with Month and outcome
 var = "Origin_Dest"
-outcomeName = "Dep_Del15"
 d = full_data_dep.select("Origin", "Dest", outcomeName) \
                  .withColumn(var, f.concat(f.col('Origin'), f.lit('-'), f.col('Dest')))
 
