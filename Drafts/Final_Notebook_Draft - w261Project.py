@@ -483,6 +483,61 @@ display(airlines.take(1000))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Apply Brieman's Theorem to Categorical Features
+
+# COMMAND ----------
+
+import pyspark.sql.functions as F
+from pyspark.sql import Window
+
+# Applies Breiman's Method to the categorical feature
+# Generates the ranking of the categories in the provided categorical feature
+# Orders the categories by the average outcome ascending, from integer 1 to n
+# Note that this should only be run on the training data
+def GenerateBriemanRanks(df, catFeatureName, outcomeName):
+  window = Window.orderBy('avg(' + outcomeName + ')')
+  briemanRanks = df.groupBy(catFeatureName).avg(outcomeName) \
+                   .sort(F.asc('avg(' + outcomeName + ')')) \
+                   .withColumn(catFeatureName + "_brieman", F.row_number().over(window))
+  return briemanRanks
+
+# Using the provided Brieman's Ranks, applies Brieman's Method to the categorical feature
+# and creates a column in the original table using the mapping in briemanRanks variable
+# Note that this effectively transforms the categorical feature to a numerical feature
+# The new column will be the original categorical feature name, suffixed with '_brieman'
+def ApplyBriemansMethod(df, briemanRanks, catFeatureName, outcomeName):
+  if (catFeatureName + "_brieman" in df.columns):
+    print("Variable '" + catFeatureName + "_brieman" + "' already exists")
+    return df
+  
+  res = df.join(F.broadcast(briemanRanks), df[catFeatureName] == briemanRanks[catFeatureName], how='left') \
+          .drop(briemanRanks[catFeatureName]) \
+          .drop(briemanRanks['avg(' + outcomeName + ')']) \
+          .fillna(-1, [catFeatureName + "_brieman"])
+  return res
+
+# COMMAND ----------
+
+# Apply brieman ranking to all datasets, based on ranking developed from training data
+briemanRanksDict = {} # save to apply later as needed
+featuresToApplyBriemanRanks = catFeatureNames + intFeatureNames + holFeatureNames
+for feature in featuresToApplyBriemanRanks:
+  # Get ranks for feature, based on training data only
+  ranksDict = GenerateBriemanRanks(train, feature, outcomeName)
+  briemanRanksDict[feature] = ranksDict
+  
+  # Apply Brieman's method & do feature transformation for all datasets
+  mini_train = ApplyBriemansMethod(mini_train, ranksDict, feature, outcomeName)
+  train = ApplyBriemansMethod(train, ranksDict, feature, outcomeName)
+  val = ApplyBriemansMethod(val, ranksDict, feature, outcomeName)
+  test = ApplyBriemansMethod(test, ranksDict, feature, outcomeName)
+  airlines = ApplyBriemansMethod(airlines, ranksDict, feature, outcomeName)
+  
+briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Write and Reference augmented airlines
 
 # COMMAND ----------
@@ -517,17 +572,13 @@ test_avro = WriteAndRefDataToAvro(test, 'augmented_test')
 
 print("All Available Features:")
 print("------------------------")
-print(" - Numerical Features: \t\t", numFeatureNames)
-print(" - Categorical Features: \t", catFeatureNames)
-print(" - Binned Features: \t\t", binFeatureNames)
-print(" - Interaction Features: \t", intFeatureNames)
-print(" - Holiday Feature: \t\t", holFeatureNames)
-print(" - Origin Activity Feature: \t", orgFeatureNames)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Apply Breiman's Theorem to Categorical & Interaction Features!!!
+print(" - Numerical Features: \t\t", numFeatureNames) # numerical features
+print(" - Categorical Features: \t", catFeatureNames) # categorical features
+print(" - Binned Features: \t\t", binFeatureNames) # numerical features
+print(" - Interaction Features: \t", intFeatureNames) # categorical features
+print(" - Holiday Feature: \t\t", holFeatureNames) # categorical features
+print(" - Origin Activity Feature: \t", orgFeatureNames) # numerical features
+print(" - Brieman Ranked Features: \t", briFeatureNames) # numerical features
 
 # COMMAND ----------
 
@@ -579,7 +630,6 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
     indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
 
-    # default setting: dropLast=True
     encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
                  outputCol="{0}_encoded".format(indexer.getOutputCol()))
                  for indexer in indexers ]
@@ -653,24 +703,24 @@ def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
   # Precision-Recall
   evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
   PR = evaluator.evaluate(predictions)
-  print("Precision-Recall:\t", PR)
+  print("Area-Under-PR:\t", PR)
   
   # Are under the curve
   evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
   AUC = evaluator.evaluate(predictions)
-  print("Area-Under-Curve:\t", AUC)
+  print("Area-Under-ROC:\t", AUC)
 
 
 # COMMAND ----------
 
-dataName = 'mini_train'
+dataName = 'train'
 algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
   if algorithm == 'svm':
-    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
     PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
   else:
-    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
     predictions = tr_model.transform(val_algo)
     PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
 
@@ -722,7 +772,7 @@ outcomeName = 'Dep_Del30'
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###### Dataset
+# MAGIC ##### Dataset
 
 # COMMAND ----------
 
@@ -745,62 +795,51 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Decision trees create a model that predicts the label (or class) by evaluating a set of rules that follow an IF-THEN-ELSE pattern. The questions are the nodes, and the answers (true or false) are the branches in the tree to the child nodes. A decision tree model estimates the minimum number of true/false questions needed, to assess the probability of making a correct decision. 
+# MAGIC ##### Introduction to Decision Trees
+# MAGIC Decision trees predict the label (or class) by evaluating a set of rules that follow an IF-THEN-ELSE pattern. The questions are the nodes, and the answers (true or false) are the branches in the tree to the child nodes. A decision tree model estimates the minimum number of true/false questions needed, to assess the probability of making a correct decision. 
+# MAGIC 
+# MAGIC We use CART decision tree algorithm (Classification and Regression Trees). Decision Tree is a greedy algorithm that considers all features to select the best feature for the split. Initially, we have a root node for the tree. The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input. Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets. The subsets become input to the child nodes added to the tree for the next level of splitting. The goal is to produce the purest distribution of labels at each node.
+# MAGIC 
+# MAGIC If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further. On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further. The trick to building an effective tree is to decide which questions to ask and when. To do this, we need to quantify how well a question can split the dataset.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Introduction
-# MAGIC - The first column 'Dep_Del30' is the label or outcome variable, and the rest of the columns are features. 
-# MAGIC - The goal of the decision tree is to predict the departure delay.
-# MAGIC - The dataset has both numeric and categorical features.
-# MAGIC - We use CART decision tree algorithm (Classification and Regression Trees). 
-# MAGIC - Decision trees use a process to ask certain questions at a certain point to make decisions about splitting the data.
-# MAGIC - It is a greedy algorithm that considers all features.
-# MAGIC - Pruning
+# MAGIC ##### Entropy
+# MAGIC Entropy is a measure of disorder or impurity in the dataset. In decision trees, we try to separate the data and group the samples together in the classes they belong to. We know their label since the tree is constructed from the training set. The objective is to maximize the purity of the groups as much as possible each time  a new child node of the tree is created. At each branching, we want to decrease the entropy, so this quantity is computed before the split and after the split. If it decreases, the split is validated and we can proceed to the next step, otherwise, we must try to split with another feature or stop this branch. 
+# MAGIC 
+# MAGIC Entropy ranges between 0 and 1. It is 0 for a pure set (i.e), group of observations containing only one label.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Decision tree inference
-# MAGIC - Initially, we have a root node for the tree.
-# MAGIC - The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input.
-# MAGIC - Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets.
-# MAGIC - The subsets become input to the child nodes added to the tree for the next level of splitting.
-# MAGIC - The ultimate goal is to produce the purest distribution of labels at each node.
-# MAGIC - If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further.
-# MAGIC - On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further.
-# MAGIC - The trick to building an effective tree is to decide which questions to ask and when.
-# MAGIC - To do this, we need to quantify how well a question can split the dataset.
+# MAGIC ##### Mathematical definition of entropy
+# MAGIC 
+# MAGIC The general formula for entropy is:
+# MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$
+# MAGIC 
+# MAGIC Since our dataset has a binary classification, all the observations fall into two classes. Suppose we have a set of N observations in the dataset. Let's assume that n observations have label 1 and m = N - n observations have label 0. The ratios p and q are given by:
+# MAGIC 
+# MAGIC $$p = \frac{n}{N}$$ $$q = \frac{m}{N} = 1-p $$
+# MAGIC 
+# MAGIC Entropy is given by the following equation:
+# MAGIC $$E = -p {\log_2 (p)} -q {\log_2 (q)}$$
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### View of tree building
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ##### Gini impurity and Information gain
-# MAGIC - We quantify the amount of uncertainity at a single node by a metric called the gini impurity. 
-# MAGIC - We can quantify how much a question reduces the uncertainity by using a metric called the information gain.
-# MAGIC - These two metrics are used to select the best question at each split point. 
-# MAGIC - The best question reduces the uncertainity the most.
-# MAGIC - Given the question, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes).
-# MAGIC - This process continues until all the nodes are pure or we reach a stopping criteria (such as a certain number of examples).
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Math / Decision Tree Learning
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### View of tree building / completed tree
-
-# COMMAND ----------
-
-
+# MAGIC 
+# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a question reduces the uncertainity by using a metric called the information gain. These two metrics are used to select the best question at each split point. The best question reduces the uncertainity the most. Given the question, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes). This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
 
 # COMMAND ----------
 
