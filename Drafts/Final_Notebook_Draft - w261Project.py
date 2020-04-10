@@ -194,7 +194,7 @@ def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   
 # Plot Carrier and outcome with bar plots of probability on x axis
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
-MakeProbBarChart(train, "Op_Unique_Carrier", xtype='category', numDecimals=4)
+MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
@@ -209,7 +209,7 @@ MakeProbBarChart(train, "Op_Unique_Carrier", xtype='category', numDecimals=4)
 # COMMAND ----------
 
 # Look at balance for outcome in training
-display(train.groupBy('Dep_Del30').count().sort('Dep_Del30'))
+display(airlines.groupBy(F.col('Dep_Delay') >= 30).count().sort(F.col('Dep_Delay') >= 30))
 
 # COMMAND ----------
 
@@ -362,6 +362,7 @@ display(train_and_val.select([F.count(F.when(F.isnan(c) | F.col(c).isNull(), c))
 # COMMAND ----------
 
 from pyspark.ml.feature import Bucketizer
+from pyspark.sql.types import IntegerType
 
 # Augments the provided dataset for the given feature/variable with a binned version
 # of that variable, as defined by splits parameter
@@ -375,6 +376,7 @@ def BinFeature(df, featureName, splits, labels=None):
   # Generate binned column for feature
   bucketizer = Bucketizer(splits=splits, inputCol=featureName, outputCol=featureName + "_bin")
   df_bin = bucketizer.setHandleInvalid("keep").transform(df)
+  df_bin = df_bin.withColumn(featureName + "_bin", df_bin[featureName + "_bin"].cast(IntegerType()))
   
   if (labels is not None):
     # Map bucket number to binned feature label
@@ -394,9 +396,9 @@ def BinFeature(df, featureName, splits, labels=None):
 
 # Bin numerical features in entire airlines dataset
 # Note that splits are not based on test set but are applied to test set (as would be applied at inference time)
-airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400]) # 2-hour blocks
-airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400]) # 2-hour blocks
-airlines = BinFeature(airlines, 'CRS_Elapsed_Time', splits = [float("-inf"), 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, float("inf")]) # 1-hour blocks
+airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
+airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
+airlines = BinFeature(airlines, 'CRS_Elapsed_Time', splits = [float("-inf")] + [i for i in range(0, 660 + 1, 60)] + [float("inf")]) # 1-hour blocks
 binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
 
 display(airlines.take(6))
@@ -521,7 +523,7 @@ def AddOriginActivityFeature(df):
   
   # Construct a flight bucket attribute to group flights occuring on the same day in the same time block originating from the same airport
   # Compute aggregated statistics for these flight buckets
-  df = df.withColumn("flightbucket", F.concat_ws("-", F.col("Month"), F.col("Day_Of_Month"), F.col("CRS_Dep_Time_bin"), F.col("Origin")))
+  df = df.withColumn("flightbucket", F.concat_ws("-", F.col("Year"), F.col("Month"), F.col("Day_Of_Month"), F.col("CRS_Dep_Time_bin"), F.col("Origin")))
   originActivityAgg = df.groupBy("flightbucket").count()
   
   # Join aggregated statistics back to original dataframe
@@ -541,6 +543,11 @@ display(airlines.take(1000))
 
 # MAGIC %md
 # MAGIC ### Apply Brieman's Theorem to Categorical Features
+
+# COMMAND ----------
+
+# Regenerate splits for Brieman ranking prep
+mini_train, train, val, test = SplitDataset(airlines)
 
 # COMMAND ----------
 
@@ -910,7 +917,7 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Information gain (or entropy / uncertainity reduction) at child node is calculated as 
+# MAGIC Information gain (or entropy / uncertainity reduction) at a child node is calculated as 
 # MAGIC $$ G = Entropy (parent) - Entropy (child) $$
 
 # COMMAND ----------
