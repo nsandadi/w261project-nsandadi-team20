@@ -92,7 +92,7 @@ display(airlines.take(6))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Explanation for why we chose the variable we chose (rationale for why not all variables are available at inference time)
+# MAGIC ### Explanation for why we chose the variables we chose (rationale for why not all variables are available at inference time)
 
 # COMMAND ----------
 
@@ -149,8 +149,12 @@ display(airlines.take(6))
 # Helper function for Group 3 graphs that plot the probability of outcome on the x axis, the number of flights on the x axis
 # With entries for each distinct value of the feature as separate bars.
 
-def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
+def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   # Filter out just to rows with delays or no delays
+  threshold = 30
+  outcomeName = 'Dep_Del' + str(threshold)
+  if (outcomeName not in full_data_dep.columns):
+    full_data_dep = full_data_dep.withColumn(outcomeName, (full_data_dep['Dep_Delay'] >= threshold).cast('integer'))
   d_delay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
   d_nodelay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
 
@@ -190,7 +194,7 @@ def MakeProbBarChart(full_data_dep, outcomeName, var, xtype, numDecimals):
   
 # Plot Carrier and outcome with bar plots of probability on x axis
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
-MakeProbBarChart(train, outcomeName, "Op_Unique_Carrier", xtype='linear', numDecimals=4)
+MakeProbBarChart(train, "Op_Unique_Carrier", xtype='category', numDecimals=4)
 
 # COMMAND ----------
 
@@ -201,6 +205,11 @@ MakeProbBarChart(train, outcomeName, "Op_Unique_Carrier", xtype='linear', numDec
 # MAGIC * If can get SMOTE working to be scalable, also discuss SMOTE and what it effectively does
 # MAGIC    - do discuss scalability concerns, b/c do need to apply knn algo & predict on each datapoint
 # MAGIC * Discuss how balancing the dataset with stacking or SMOTE allows us to ensure that our models don't become biased towards the no-delay class, but it does introduce some more variance (bias-variance tradeoff)
+
+# COMMAND ----------
+
+# Look at balance for outcome in training
+display(train.groupBy('Dep_Del30').count().sort('Dep_Del30'))
 
 # COMMAND ----------
 
@@ -676,11 +685,10 @@ catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 
 def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
-    indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in catFeatureNames ]
+    indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in categoricalCols ]
 
-    encoders = [ OneHotEncoder(inputCol=indexer.getOutputCol(),
-                 outputCol="{0}_encoded".format(indexer.getOutputCol()))
-                 for indexer in indexers ]
+    encoder = OneHotEncoderEstimator(inputCols=[indexer.getOutputCol() for indexer in indexers],
+                                 outputCols=["{0}_encoded".format(indexer.getOutputCol()) for indexer in indexers])
     
     # If it si svm do hot encoding
     if svmflag == True:
@@ -810,6 +818,7 @@ binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin
 intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
 holFeatureNames = ['Holiday']
 orgFeatureNames = ['Origin_Activity']
+briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
 outcomeName = 'Dep_Del30'
 
 # COMMAND ----------
@@ -854,9 +863,13 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 
 # MAGIC %md
 # MAGIC ##### Entropy
-# MAGIC Entropy is a measure of disorder or impurity in the dataset. In decision trees, we try to separate the data and group the samples together in the classes they belong to. We know their label since the tree is constructed from the training set. The objective is to maximize the purity of the groups as much as possible each time  a new child node of the tree is created. At each branching, we want to decrease the entropy, so this quantity is computed before the split and after the split. If it decreases, the split is validated and we can proceed to the next step, otherwise, we must try to split with another feature or stop this branch. 
+# MAGIC Entropy is a measure of disorder in the dataset. It characterizes the (im)purity of an arbitrary collection of examples. In decision trees, at each node, we split the data and try to group together samples that belong in the same class. The objective is to maximize the purity of the groups each time a new child node of the tree is created. The goal is to decrease the entropy at each split. If the entropy decreases, the split is validated and we can proceed to the next step, else, the decision tree picks another feature. 
 # MAGIC 
-# MAGIC Entropy ranges between 0 and 1. It is 0 for a pure set (i.e), group of observations containing only one label.
+# MAGIC Entropy ranges between 0 and 1. It is 0 for a pure set (i.e), group of observations containing only one label. 
+# MAGIC 
+# MAGIC ##### Gini impurity and Information gain
+# MAGIC 
+# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a split reduces the uncertainity by using a metric called the information gain. Information gain is the expected reduction in entropy caused by partitioning the examples according to a given attribute. These two metrics are used to select the best feature and threshold at each split point. The best feature reduces the uncertainity the most. Given the feature and threshold, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes). This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
 
 # COMMAND ----------
 
@@ -876,19 +889,21 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### View of tree building
+# MAGIC ##### Building the decision tree 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In our toy dataset, we have ten observations. Four of them have label 1 and six of them have label 0. Thus, entropy at the root node is given by:
+# MAGIC 
+# MAGIC $$ Entropy = -\frac{4}{10} {\log_2 (\frac{4}{10})} -\frac{6}{10} {\log_2 (\frac{6}{10})} = 0.966 $$
+# MAGIC 
+# MAGIC Entropy is close to 1 as we have a distribution close to 50/50 for the observations.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC Insert picture of tree here.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Gini impurity and Information gain
-# MAGIC 
-# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a question reduces the uncertainity by using a metric called the information gain. These two metrics are used to select the best question at each split point. The best question reduces the uncertainity the most. Given the question, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes). This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
 
 # COMMAND ----------
 
