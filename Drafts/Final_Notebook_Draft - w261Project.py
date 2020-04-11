@@ -32,10 +32,24 @@
 
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.functions import col
+from pyspark.sql.functions import when
+
+
 from pyspark.ml.feature import VectorIndexer
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.feature import StringIndexer
+
 from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
+from pyspark.ml.feature import OneHotEncoderEstimator
+
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.classification import NaiveBayes
+from pyspark.ml.classification import LinearSVC
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.mllib.evaluation import MulticlassMetrics
+
 
 # COMMAND ----------
 
@@ -665,21 +679,17 @@ print(" - Brieman Ranked Features: \t", briFeatureNames) # numerical features
 
 # COMMAND ----------
 
-# For the 4 models, can take train dataset & subset to the features in numFeatureNames & catFeatureNames
-# Bring in code for 4 models, train, and do prediction & evaluation on validation set
-
-# COMMAND ----------
-
 # - Numerical Features: 		 ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
 # - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
-# take the train dataset and subset to the features in numFeatureNames & catFeatureNames
-# outcomeName + numFeatureNames + catFeatureNames
-mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + catFeatureNames)
 
+#subset the dataset to the features in numFeatureNames & catFeatureNames
+mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + catFeatureNames)
 train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
 val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
 
 # Define outcome & features to use in model development
+# numFeatureNames are continuous features
+# catFeatureNames are categorical features
 outcomeName = 'Dep_Del30'
 numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
 catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] 
@@ -687,20 +697,18 @@ catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 
 # COMMAND ----------
 
-# take the train dataset and subset to the features in numFeatureNames & catFeatureNames
-# outcomeName + numFeatureNames + catFeatureNames
+# this function train the model 
+# Only support vector machines (svm) use one hot encoding for the categorical variable 
 
 def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
-    indexers = [ StringIndexer(inputCol=c, outputCol= c + "_indexed", handleInvalid="keep") for c in categoricalCols ]
-
-    encoder = OneHotEncoderEstimator(inputCols=[indexer.getOutputCol() for indexer in indexers],
-                                 outputCols=["{0}_encoded".format(indexer.getOutputCol()) for indexer in indexers])
-    
-    # If it si svm do hot encoding
+    indexers = [ StringIndexer(inputCol=cat, outputCol= cat + "_indexed", handleInvalid="keep") for cat in categoricalCols ]
+  
+    # If it is svm do hot encoding
     if svmflag == True:
-      assembler = VectorAssembler(inputCols=[encoder.getOutputCol() for encoder in encoders]
-                                + continuousCols, outputCol="features")
+      encoder = OneHotEncoderEstimator(inputCols=[indexer.getOutputCol() for indexer in indexers],
+                                 outputCols=["{0}_encoded".format(indexer.getOutputCol()) for indexer in indexers])
+      assembler = VectorAssembler(inputCols=encoder.getOutputCols() + continuousCols, outputCol="features")
     # else skip it
     else:
       assembler = VectorAssembler(inputCols = continuousCols + [cat + "_indexed" for cat in categoricalCols], outputCol = "features")
@@ -715,12 +723,15 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
       pipeline = Pipeline(stages=indexers + [assembler,dt])
       
     elif algorithm == 'nb':
+      # set the CRS_Elapsed_Time to 0 if its negative
+      df = df.withColumn("CRS_Elapsed_Time", \
+              when(df["CRS_Elapsed_Time"] < 0, 0.0).otherwise(df["CRS_Elapsed_Time"]))
       nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
       pipeline = Pipeline(stages=indexers + [assembler,nb])
       
     elif algorithm == 'svm':
       svc = LinearSVC(labelCol = outcomeName, featuresCol = "features", maxIter=50, regParam=0.1)
-      pipeline = Pipeline(stages=indexers + encoders + [assembler,svc])
+      pipeline = Pipeline(stages=indexers + [encoder,assembler,svc])
       
     else:
       pass
@@ -731,11 +742,18 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
 # COMMAND ----------
 
+# this function run the prediction in the model
+# And calculate prediction metrics like accuracy, recall, precision ...etc
 def PredictAndEvaluate(model, data, dataName, outcomeName, algorithm):
   predictions = model.transform(data)
   EvaluateModelPredictions(predictions, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
+
+# Model Evaluation
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+
 
 def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
   # Make predictions on test data to measure the performance of the model
@@ -751,28 +769,27 @@ def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
   # Recall
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
   recall = evaluator.evaluate(predictions)
-  print("Recall:\t\t", recall)
+  print("Recall:\t\t\t", recall)
 
   # Precision
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
   precision = evaluator.evaluate(predictions)
-  print("Precision:\t", precision)
+  print("Precision:\t\t", precision)
 
   # F1
   evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
   f1 = evaluator.evaluate(predictions)
-  print("F1:\t\t", f1)
+  print("F1:\t\t\t", f1)
 
-  # Precision-Recall
+  # Area under Precision-Recall
   evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
   PR = evaluator.evaluate(predictions)
-  print("Area-Under-PR:\t", PR)
+  print("Area-Under-PR:\t\t", PR)
   
-  # Are under the curve
+  # Are under the ROC curve
   evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
   AUC = evaluator.evaluate(predictions)
-  print("Area-Under-ROC:\t", AUC)
-
+  print("Area-Under-ROC:\t\t", AUC)
 
 # COMMAND ----------
 
@@ -784,7 +801,6 @@ for algorithm in algorithms:
     PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
   else:
     tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-    predictions = tr_model.transform(val_algo)
     PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
