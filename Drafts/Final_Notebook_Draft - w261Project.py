@@ -16,7 +16,7 @@
 # MAGIC 
 # MAGIC In developing such models, we seek to answer the core question, **"Given known information prior to a flight's departure, can we predict departure delays and identify the likely causes of such delays?"**. In the last few years, about 11% of all US domestic flights resulted in significant delays, and answering these questions can truly help us to understand why such delays happen. In doing so, not only can airlines and airports start to identify likely causes and find ways to mitigate them and save both time and money, but air travelers also have the potential to better prepare for likely delays and possibly even plan for different flights in order to reduce their chance of significant delay. 
 # MAGIC 
-# MAGIC To effectively investigate this question and produce a practically useful model, we will aim to develop a model that performs better than a baseline model that predicts the majority class of 'no delay' 89% of the time (the equivalent of random guessing, which would have an accuracy of 89%). Given the classification nature of this problem, we will concentrate on improving metrics such as precision, recall and F1 over our baseline model. We will also concentrate on producing models that can explain what features of flights known prior to departure time can best predict departure delays and from these, attempt to best infer possible causes of departure delays. 
+# MAGIC To effectively investigate this question and produce a practically useful model, we will aim to develop a model that performs better than a baseline model that predicts the majority class of 'no delay' every time (this would have an accuracy of 89%). Having said that, we have been informed by our instructors that the state of the art is 85% accuracy, but will proceed to also prioritize model interpretability along side model performance metrics to help address our core question. Given the classification nature of this problem, we will concentrate on improving metrics such as precision, recall, F1, and area under curve (AUC) over our baseline model. We will also concentrate on producing models that can explain what features of flights known prior to departure time can best predict departure delays and from these, attempt to best infer possible causes of departure delays. 
 
 # COMMAND ----------
 
@@ -95,13 +95,64 @@ airlines = LoadAirlineDelaysData()
 
 # COMMAND ----------
 
+# Generate other Departure Delay outcome indicators for n minutes
+def CreateNewDepDelayOutcome(data, thresholds):
+  for threshold in thresholds:
+    data = data.withColumn('Dep_Del' + str(threshold), (data['Dep_Delay'] >= threshold).cast('integer'))
+  return data  
+  
+# Generate Dep_Del30 outcome variable
+airlines = CreateNewDepDelayOutcome(airlines, [30])
+
+# COMMAND ----------
+
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+joiningFeatures = ['FL_Date'] # Features needed to join with the holidays dataset--not needed for training
+
+airlines = airlines.select([outcomeName] + numFeatureNames + catFeatureNames + joiningFeatures)
+
+# COMMAND ----------
+
 # Print examples of flights
 display(airlines.take(6))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirty of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for future flights. 
+# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirety of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for future flights. 
+
+# COMMAND ----------
+
+def SplitDataset(airlines):
+  # Split airlines data into train, dev, test
+  test = airlines.where('Year = 2019') # held out
+  train, val = airlines.where('Year != 2019').randomSplit([7.0, 1.0], 6)
+
+  # Select a mini subset for the training dataset (~2000 records)
+  mini_train = train.sample(fraction=0.0001, seed=6)
+
+  print("mini_train size = " + str(mini_train.count()))
+  print("train size = " + str(train.count()))
+  print("val size = " + str(val.count()))
+  print("test size = " + str(test.count()))
+  
+  return (mini_train, train, val, test) 
+
+mini_train, train, val, test = SplitDataset(airlines)
+
+# COMMAND ----------
+
+# Write train & val data to parquet for easier EDA
+def WriteAndRefDataToParquet(data, dataName):
+  # Write data to parquet format (for easier EDA)
+  data.write.mode('overwrite').format("parquet").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+  
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
+train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
 
 # COMMAND ----------
 
@@ -272,71 +323,6 @@ display(airlines.groupBy(F.col('Dep_Delay') >= 30).count().sort(F.col('Dep_Delay
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Creating our Outcome Variable: `Dep_Del30`
-
-# COMMAND ----------
-
-# Generate other Departure Delay outcome indicators for n minutes
-def CreateNewDepDelayOutcome(data, thresholds):
-  for threshold in thresholds:
-    data = data.withColumn('Dep_Del' + str(threshold), (data['Dep_Delay'] >= threshold).cast('integer'))
-  return data  
-  
-airlines = CreateNewDepDelayOutcome(airlines, [30])
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Filter to Columns Available at Inference Time
-
-# COMMAND ----------
-
-outcomeName = 'Dep_Del30'
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
-catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
-joiningFeatures = ['FL_Date'] # Features needed to join with the holidays dataset--not needed for training
-
-airlines = airlines.select([outcomeName] + numFeatureNames + catFeatureNames + joiningFeatures)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Split Dataset into train/val/test & save to disk as parquet & avro
-
-# COMMAND ----------
-
-def SplitDataset(airlines):
-  # Split airlines data into train, dev, test
-  test = airlines.where('Year = 2019') # held out
-  train, val = airlines.where('Year != 2019').randomSplit([7.0, 1.0], 6)
-
-  # Select a mini subset for the training dataset (~2000 records)
-  mini_train = train.sample(fraction=0.0001, seed=6)
-
-  print("mini_train size = " + str(mini_train.count()))
-  print("train size = " + str(train.count()))
-  print("val size = " + str(val.count()))
-  print("test size = " + str(test.count()))
-  
-  return (mini_train, train, val, test) 
-
-mini_train, train, val, test = SplitDataset(airlines)
-
-# COMMAND ----------
-
-# Write train & val data to parquet for easier EDA
-def WriteAndRefDataToParquet(data, dataName):
-  # Write data to parquet format (for easier EDA)
-  data.write.mode('overwrite').format("parquet").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
-  
-  # Read data back directly from disk 
-  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
-
-train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ### Show columns of interest summarized with counts of null values & summary stats
 # MAGIC * Clearly explain & define each variable
 # MAGIC * Justify missing values & how will handle
@@ -410,8 +396,10 @@ def BinFeature(df, featureName, splits, labels=None):
 
 # Bin numerical features in entire airlines dataset
 # Note that splits are not based on test set but are applied to test set (as would be applied at inference time)
-airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
-airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
+# airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
+# airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
+airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
+airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
 airlines = BinFeature(airlines, 'CRS_Elapsed_Time', splits = [float("-inf")] + [i for i in range(0, 660 + 1, 60)] + [float("inf")]) # 1-hour blocks
 binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
 
@@ -912,7 +900,12 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Building the decision tree 
+# MAGIC ##### Building the decision tree
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Entropy at Level 0 
 # MAGIC 
 # MAGIC In our toy dataset, we have ten observations. Four of them have label 1 and six of them have label 0. Thus, entropy at the root node is given by:
 # MAGIC 
@@ -923,18 +916,26 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on this attribute. We add the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
+# MAGIC ##### Entropy at Level 1
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Insert picture of tree here.
+# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on this attribute. We add the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC Information gain (or entropy / uncertainity reduction) at a child node is calculated as 
 # MAGIC $$ G = Entropy (parent) - Entropy (child) $$
+
+# COMMAND ----------
+
+displayHTML("<img src ='files/Decision_Tree_Building.png/'>")
+
+# COMMAND ----------
+
+displayHTML("<img src ='files/Drafts/Decision_Tree_toy_example.jpg/'>")
 
 # COMMAND ----------
 
@@ -1064,13 +1065,11 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 # COMMAND ----------
 
 def TransformDataForEnsemble(full_dataset):
-  str_features = ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"] # String features
 
   # Convert strings to index
-  str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in str_features]
-  cat_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance_Group", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+  str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"]]
   target       = ["Dep_Del30"]
-  all_features = cat_features + ["Origin_Activity"]
+  all_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin', "Op_Unique_Carrier_index", "Origin_index", "Dest_index", "Holiday_index", "Origin_Activity"]
   
   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
   ensemble_pipeline = Pipeline(stages=str_indexers + [assembler])
@@ -1172,6 +1171,10 @@ from multiprocessing.pool import ThreadPool
 # allow up to 10 concurrent threads
 pool = ThreadPool(10)
 
+# You can increase the timeout for broadcasts. Default is 300 s
+spark.conf.set('spark.sql.broadcastTimeout', '900000ms')
+spark.conf.get('spark.sql.broadcastTimeout')
+
 # COMMAND ----------
 
 def TrainEnsembleModels(en_train, featureIndexer, classifier) :
@@ -1214,13 +1217,14 @@ def makedict(em, columns, features):
 
 plt, rows, columns = makedict(ensemble_model, columns=3, features=all_ensemble_features)
 
+
 fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
 
 for key, value in plt.items() :
     fig.add_trace(go.Bar(
       x=plt[key]['features'],
       y=plt[key]['importance'],
-      marker_color=list(map(lambda x: px.colors.sequential.Plasma[x], range(0,len(plt[key]['features'])))),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
       name = '',
       showlegend = False,
     ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
@@ -1230,7 +1234,7 @@ for key, value in plt.items() :
     if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
     fig.update_xaxes(tickangle=-45)
     
-fig.update_layout(height=1000, width=1000, title_text="Feature importance for individual ensembles")
+fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles")
 fig.update_layout(xaxis_tickangle=-45)
 fig.show()
 
@@ -1310,10 +1314,21 @@ def TrainCombiner(data, featureIndexer, classifier):
 # Set up VectorIndexer for second level training
 ensemble_featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=3).fit(ensemble_transformed)
 
-# Final ensemble 
-model_trained_ensemble = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
+# COMMAND ----------
+
+from pyspark.ml.classification import LogisticRegression
+# Logistic Regression
+model_trained_ensemble_lr = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
+              LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
+
+# Linear SVM
+from pyspark.ml.classification import LinearSVC
+model_trained_ensemble_svm = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
+              LinearSVC(featuresCol="indexedFeatures", maxIter=10, regParam=0.1))
+
+# Random forest
+model_trained_ensemble_rf = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
               RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
-  
 
 # COMMAND ----------
 
