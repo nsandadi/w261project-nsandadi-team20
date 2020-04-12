@@ -772,10 +772,13 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
     recall = 0 if ((metric['TP'] + metric['FN']) == 0) else metric['TP'] /(metric['TP'] + metric['FN'])
     fscore = 0 if (precision+recall) == 0 else 2 * precision * recall /(precision+recall)
     # Compute Area under ROC
-    evaluator = BinaryClassificationEvaluator(rawPredictionCol="prediction", labelCol=outcomeName)
+    evaluator = BinaryClassificationEvaluator(rawPredictionCol="rawPrediction", labelCol=outcomeName)
     areaUnderROC = evaluator.evaluate(predict_df)
-    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}".format(
-        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7)))
+    # Compute Area under Precision-Recall
+    evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
+    areaUnderPR = evaluator.evaluate(predict_df)
+    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}, AreaUnderPR = {}".format(
+        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPR, 7) ))
     print("\nConfusion matrix :")
     print(evaluation_df.drop("metric", axis =1))
     print("\n")
@@ -785,15 +788,17 @@ def PredictAndEvaluate(model, data, dataName, outcomeName):
 
 # COMMAND ----------
 
-dataName = 'train'
+dataName = 'val'
 algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
   if algorithm == 'svm':
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
-    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
+    titleName = dataName+ ' with ' + algorithm
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName)
   else:
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
-    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName, algorithm)
+    titleName = dataName+ ' with ' + algorithm
+    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
 
 # COMMAND ----------
 
@@ -1245,7 +1250,6 @@ fig.show()
 def do_ensemble_prediction(em, train_en) :
     prediction_array = []
     for num, m in enumerate(em) :
-        print("Run prediction on ensemble model : " + str(num))
         predictions = em[num].transform(train_en)
         if num == 0 : prediction_array.append(
             predictions.select("label").withColumn('ROW_ID', F.monotonically_increasing_id())
@@ -1346,78 +1350,57 @@ def FinalEnsmblePipeline(model_comb, model_group, data) :
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC #### Model selection
+# MAGIC #### Model weights of ensembles
+# MAGIC 
+# MAGIC Below shows, Logistic regression and SV gives equal importance to all level one modes as opposed to Random forest.
 
 # COMMAND ----------
-
-['model 0', 'model 1', 'model 2', 'model 3', 'model 4', 'model 5', 'model 6', 'model 7',  'model 8']
-[ "model {}".format(s) for s in range(0, 9)]
-
-# COMMAND ----------
-
-# fig = go.Figure()
-
-# fig.add_trace(go.Bar(
-#   #x=['model 0', 'model 1', 'model 2', 'model 3', 'model 4', 'model 5', 'model 6', 'model 7',  'model 8'],
-#   x= [ "model {}".format(s) for s in range(0, 9)],
-#   y=list(model_trained_ensemble_rf.stages[-1].featureImportances.toArray()),
-#   marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
-#   name = '',
-#   showlegend = False,
-# ))
-
-# fig.update_layout(xaxis_tickangle=-45)
-# fig.update_layout(barmode='stack', 
-#                   xaxis=dict(categoryorder='total descending', title='Models'), 
-#                   title=go.layout.Title(text="Second level model selection (Random forest)"),  
-#                   yaxis=dict(title='Importance'))
-# fig.update_layout(height=500, width=500)
-
-# fig.show()
-
 
 from collections import defaultdict
 
-def makedict(em, columns, features):
+def makedict(em, columns, features, info):
     plot = defaultdict(dict)
     rows = int(len(em)/columns)
     for num, m in enumerate(em):
-        plot[num]['importance'] = em
+        plot[num]['importance'] = em[num]
         plot[num]['features']   = features
         plot[num]['x_pos']      = int(num/columns)+1
         plot[num]['y_pos']      = num%columns+1
-        plot[num]['title']      = "ensemble model {}".format(num)
+        plot[num]['title']      = info[num]
     return plot, rows, columns
 
 plt, rows, columns = makedict([
-  model_trained_ensemble_lr.stages[-1].coefficients.toArray(), 
-  model_trained_ensemble_svm, 
-  list(m.stages[-1].featureImportances.toArray())], 
+  list(model_trained_ensemble_lr.stages[-1].coefficients.toArray()), 
+  list(model_trained_ensemble_svm.stages[-1].coefficients.toArray()), 
+  list(model_trained_ensemble_rf.stages[-1].featureImportances.toArray())], 
   columns=3, 
-  features=[ "model {}".format(s) for s in range(0, 9)])
+  features=[ "model {}".format(s) for s in range(0, 9)],
+  info=[
+    "Logistic regression - weights of ensembles",
+    "SVM - weights of ensembles",
+    "Random forest - weights of ensembles",
+  ]
+)
 
-print (rows, columns)
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
 
-
-# fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
-
-# for key, value in plt.items() :
-#     fig.add_trace(go.Bar(
-#       x=plt[key]['features'],
-#       y=plt[key]['importance'],
-#       marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
-#       name = '',
-#       showlegend = False,
-#     ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+for key, value in plt.items() :
+    fig.add_trace(go.Bar(
+      x=plt[key]['features'],
+      y=plt[key]['importance'],
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
+      name = '',
+      showlegend = False,
+    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
     
-#     fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-#     fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-#     if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-#     fig.update_xaxes(tickangle=-45)
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(tickangle=-45)
     
-# fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles")
-# fig.update_layout(xaxis_tickangle=-45)
-# fig.show()
+fig.update_layout(height=400, width=1200, title_text="Feature importance for individual ensembles")
+fig.update_layout(xaxis_tickangle=-45)
+fig.show()
 
 # COMMAND ----------
 
@@ -1426,8 +1409,10 @@ print (rows, columns)
 
 # COMMAND ----------
 
-ensemble_test_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_test)
-EvaluateModelPredictions(ensemble_test_prediction, dataName='test')
+for (name, models)  in [("Logistic regression", model_trained_ensemble_lr), ("Logistic regression", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
+  print(name, models)
+# ensemble_test_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_test)
+# EvaluateModelPredictions(ensemble_test_prediction, dataName='test')
 
 # COMMAND ----------
 
