@@ -177,7 +177,7 @@ featureVect.take(5)
 from pyspark.ml.clustering import KMeans
 
 # Trains a k-means model.
-kmeans = KMeans().setK(1000).setSeed(1)
+kmeans = KMeans().setK(500).setSeed(1)
 model = kmeans.fit(featureVect)
 
 # Evaluate clustering by computing Within Set Sum of Squared Errors.
@@ -392,7 +392,7 @@ def WriteAndRefDataToParquet(data, dataName):
 
 # COMMAND ----------
 
-smoted_train_kmeans = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smoted_train_kmeans')
+smoted_train_kmeans_500 = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smoted_train_kmeans_500')
 
 # COMMAND ----------
 
@@ -402,15 +402,15 @@ smoted_train_kmeans = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smoted_t
 # COMMAND ----------
 
 # Load the data into dataframe
-smoted_train_kmeans = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_smoted_train_kmeans.parquet")
+smoted_train_kmeans_500 = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_smoted_train_kmeans_500.parquet")
 
 # COMMAND ----------
 
-display(smoted_train_kmeans.take(10))
+display(smoted_train_kmeans_500.take(10))
 
 # COMMAND ----------
 
-smoted_train_kmeans.count()
+smoted_train_kmeans_500.count()
 
 # COMMAND ----------
 
@@ -428,7 +428,7 @@ display(train.groupby('DEP_DEL30').count())
 
 # COMMAND ----------
 
-display(smoted_train_kmeans.groupby('DEP_DEL30').count())
+display(smoted_train_kmeans_500.groupby('DEP_DEL30').count())
 
 # COMMAND ----------
 
@@ -438,7 +438,7 @@ display(smoted_train_kmeans.groupby('DEP_DEL30').count())
 # COMMAND ----------
 
 train_delay = train.filter(train.DEP_DEL30 == 1)
-smoted_train_kmeans_delay = smoted_train_kmeans.filter(smoted_train_kmeans.DEP_DEL30 == 1)
+smoted_train_kmeans_500_delay = smoted_train_kmeans_500.filter(smoted_train_kmeans_500.DEP_DEL30 == 1)
 
 
 # COMMAND ----------
@@ -452,7 +452,7 @@ display(train_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARR
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARRIER'))
+display(smoted_train_kmeans_500_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARRIER'))
 
 # COMMAND ----------
 
@@ -465,7 +465,7 @@ display(train_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
+display(smoted_train_kmeans_500_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
@@ -478,7 +478,7 @@ display(train_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('DEST').count().orderBy('DEST'))
+display(smoted_train_kmeans_500_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
@@ -491,7 +491,7 @@ display(train_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
+display(smoted_train_kmeans_500_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
@@ -504,7 +504,7 @@ display(train_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
+display(smoted_train_kmeans_500_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
@@ -517,7 +517,7 @@ display(train_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('YEAR').count().orderBy('YEAR'))
+display(smoted_train_kmeans_500_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
@@ -530,7 +530,7 @@ display(train_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('MONTH').count().orderBy('MONTH'))
+display(smoted_train_kmeans_500_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
@@ -543,7 +543,7 @@ display(train_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
+display(smoted_train_kmeans_500_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
@@ -556,4 +556,4 @@ display(train_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
+display(smoted_train_kmeans_500_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
