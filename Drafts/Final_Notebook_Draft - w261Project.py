@@ -259,7 +259,7 @@ def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   
 # Plot Carrier and outcome with bar plots of probability on x axis
 # Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
-MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=4)
+MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=5)
 
 # COMMAND ----------
 
@@ -649,6 +649,14 @@ print(" - Brieman Ranked Features: \t", briFeatureNames) # numerical features
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Dataset Balancing
+# MAGIC - Describe SMOTE, show visuals from slides, show core parts of SMOTE algorithm (get neighbors, generate synthetic, the RDD-based code) but don't run the code; just load the data
+# MAGIC     - Link to notebook where the smoted dataset was actually generated
+# MAGIC - Describe Majority Class splitting (high-level with pictures from slides), say we'll use this in for stacking in ensemble approach later on
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## IV. Algorithm Exploration
 # MAGIC - Apply 2-3 Algorithms
 # MAGIC     - Logistic Regression
@@ -743,41 +751,37 @@ from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 
 
-def EvaluateModelPredictions(predictions, dataName, outcomeName,algoName):
-  # Make predictions on test data to measure the performance of the model
-  
-  print(f'\nModel Evaluation - {dataName} for {algoName}', )
-  print("------------------------------------------")
-
-  # Accuracy
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
-  accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t\t", accuracy)
-
-  # Recall
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
-  recall = evaluator.evaluate(predictions)
-  print("Recall:\t\t\t", recall)
-
-  # Precision
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
-  precision = evaluator.evaluate(predictions)
-  print("Precision:\t\t", precision)
-
-  # F1
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
-  f1 = evaluator.evaluate(predictions)
-  print("F1:\t\t\t", f1)
-
-  # Area under Precision-Recall
-  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
-  PR = evaluator.evaluate(predictions)
-  print("Area-Under-PR:\t\t", PR)
-  
-  # Are under the ROC curve
-  evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderROC")
-  AUC = evaluator.evaluate(predictions)
-  print("Area-Under-ROC:\t\t", AUC)
+# Evaluates model predictions for the provided predictions
+# Predictions must have two columns: prediction & label
+def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
+    print("Model Evaluation - " + dataName)
+    print("-----------------------------")
+    evaluation_df = (predict_df \
+                     .withColumn('metric', F.concat(F.col(outcomeName), F.lit('-'), F.col("prediction"))).groupBy("metric") \
+                     .count() \
+                     .toPandas() \
+                     .assign(label = lambda df: df.metric.map({'1-1.0': 'TP', '1-0.0': 'FN', '0-0.0': 'TN', '0-1.0' : 'FP'})))
+    metric = evaluation_df.set_index("label").to_dict()['count']
+    # Default missing metrics to 0
+    for key in ['TP', 'TN', 'FP', 'FN']:
+      metric[key] = metric.get(key, 0)
+	# Compute metrics
+    total = metric['TP'] + metric['FN'] + metric['TN'] + metric['FP']
+    accuracy = 0 if (total == 0) else (metric['TP'] + metric['TN'])/total
+    precision = 0 if ((metric['TP'] + metric['FP']) == 0) else metric['TP'] /(metric['TP'] + metric['FP'])
+    recall = 0 if ((metric['TP'] + metric['FN']) == 0) else metric['TP'] /(metric['TP'] + metric['FN'])
+    fscore = 0 if (precision+recall) == 0 else 2 * precision * recall /(precision+recall)
+    # Compute Area under ROC
+    evaluator = BinaryClassificationEvaluator(rawPredictionCol="prediction", labelCol=outcomeName)
+    areaUnderROC = evaluator.evaluate(predict_df)
+    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}".format(
+        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7)))
+    print("\nConfusion matrix :")
+    print(evaluation_df.drop("metric", axis =1))
+    print("\n")
+def PredictAndEvaluate(model, data, dataName, outcomeName):
+  predictions = model.transform(data)
+  EvaluateModelPredictions(predictions, dataName, outcomeName)
 
 # COMMAND ----------
 
@@ -845,20 +849,26 @@ outcomeName = 'Dep_Del30'
 # COMMAND ----------
 
 # Build the toy example dataset from the cleaned and transformed mini training set
-toy_dataset = mini_train.select(['Dep_Del30', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin', 'Op_Unique_Carrier']) \
-                        .filter(mini_train['Dep_Del30'] == 0) \
-                        .sample(False, 0.0039, 8)
+# toy_dataset = mini_train.select(['Dep_Del30', 'Day_Of_Week', 'Origin', 'Op_Unique_Carrier']) \
+#                         .filter(mini_train['Dep_Del30'] == 0) \
+#                         .sample(False, 0.0039, 8)
 
-toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Day_Of_Week', 'CRS_Dep_Time', 'Origin', 'Op_Unique_Carrier']) \
-                         .filter(mini_train['Dep_Del30'] == 1) \
-                         .sample(False, 0.025, 8))
+# toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Day_Of_Week', 'Origin', 'Op_Unique_Carrier']) \
+#                          .filter(mini_train['Dep_Del30'] == 1) \
+#                          .sample(False, 0.025, 8))
 
-display(toy_dataset)
+# display(toy_dataset)
 
 # COMMAND ----------
 
 # Save the toy example dataset
-toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
+# toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
+
+# COMMAND ----------
+
+# Load the toy example dataset
+toy_dataset = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_toy_dataset.parquet")
+display(toy_dataset)
 
 # COMMAND ----------
 
@@ -868,19 +878,17 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # MAGIC 
 # MAGIC We use CART decision tree algorithm (Classification and Regression Trees). Decision Tree is a greedy algorithm that considers all features to select the best feature for the split. Initially, we have a root node for the tree. The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input. Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets. The subsets become input to the child nodes added to the tree for the next level of splitting. The goal is to produce the purest distribution of labels at each node.
 # MAGIC 
-# MAGIC If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further. On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further. The trick to building an effective tree is to decide which questions to ask and when. To do this, we need to quantify how well a question can split the dataset.
+# MAGIC If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further. On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further. The trick to building an effective tree is to decide which feature to select and at which node. To do this, we need to quantify how well a feature and threshold can split the dataset.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ##### Entropy
-# MAGIC Entropy is a measure of disorder in the dataset. It characterizes the (im)purity of an arbitrary collection of examples. In decision trees, at each node, we split the data and try to group together samples that belong in the same class. The objective is to maximize the purity of the groups each time a new child node of the tree is created. The goal is to decrease the entropy at each split. If the entropy decreases, the split is validated and we can proceed to the next step, else, the decision tree picks another feature. 
-# MAGIC 
-# MAGIC Entropy ranges between 0 and 1. It is 0 for a pure set (i.e), group of observations containing only one label. 
+# MAGIC Entropy is a measure of disorder in the dataset. It characterizes the (im)purity of an arbitrary collection of examples. In decision trees, at each node, we split the data and try to group together samples that belong in the same class. The objective is to maximize the purity of the groups each time a new child node of the tree is created. The goal is to decrease the entropy as much as possible at each split. Entropy ranges between 0 and 1. Entropy of 0 indicates a pure set (i.e), group of observations containing only one label. 
 # MAGIC 
 # MAGIC ##### Gini impurity and Information gain
 # MAGIC 
-# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a split reduces the uncertainity by using a metric called the information gain. Information gain is the expected reduction in entropy caused by partitioning the examples according to a given attribute. These two metrics are used to select the best feature and threshold at each split point. The best feature reduces the uncertainity the most. Given the feature and threshold, the algorithm recursively buils the tree at each of the new child nodes (that are not leaf nodes). This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
+# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a split reduces the uncertainity by using a metric called the information gain. Information gain is the expected reduction in entropy caused by partitioning the examples according to a given feature. These two metrics are used to select the best feature and threshold at each split point. The best feature reduces the uncertainity the most. Given the feature and threshold, the algorithm recursively buils the tree at each of the new child nodes. This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
 
 # COMMAND ----------
 
@@ -888,9 +896,9 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # MAGIC ##### Mathematical definition of entropy
 # MAGIC 
 # MAGIC The general formula for entropy is:
-# MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$
+# MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$ where \\(p_i\\) is the frequentist probability of elements in class \\(i\\).
 # MAGIC 
-# MAGIC Since our dataset has a binary classification, all the observations fall into one of two classes. Suppose we have a set of N observations in the dataset. Let's assume that n observations have label 1 and m = N - n observations have label 0. p and q, the ratios of elements of each label in the dataset are given by:
+# MAGIC Since our dataset has a binary classification, all the observations fall into one of two classes. Suppose we have N observations in the dataset. Let's assume that n observations belong to label 1 and m = N - n observations belong to label 0. p and q, the ratios of elements of each label in the dataset are given by:
 # MAGIC 
 # MAGIC $$p = \frac{n}{N}$$ $$q = \frac{m}{N} = 1-p $$
 # MAGIC 
@@ -900,12 +908,7 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Building the decision tree
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Entropy at Level 0 
+# MAGIC ##### Entropy at Level 0
 # MAGIC 
 # MAGIC In our toy dataset, we have ten observations. Four of them have label 1 and six of them have label 0. Thus, entropy at the root node is given by:
 # MAGIC 
@@ -915,27 +918,24 @@ toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
 
 # COMMAND ----------
 
+# MAGIC %md <img src="https://github.com/nsandadi/Images/blob/master/Decision_Tree_toy_example.jpg?raw=true" width=70%>
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ##### Entropy at Level 1
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on this attribute. We add the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Information gain (or entropy / uncertainity reduction) at a child node is calculated as 
+# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on a particular feature. We calculate the weighted entropy of the split by adding the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
+# MAGIC 
+# MAGIC ##### Weighted entropy calculations
+# MAGIC $$ E(DayOfWeek) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (1)} = 0.94 $$
+# MAGIC $$ E(Carrier) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (0)} = 0.54 $$
+# MAGIC $$ E(Origin) = -\frac{5}{10} {\log_2 (0.72)} -\frac{5}{10} {\log_2 (0)} = 0.36 $$
+# MAGIC 
+# MAGIC ##### Information Gain at Level 1
+# MAGIC Information gain gives the number of bits of information gained about the dataset by choosing a specific feature and threshold as the first branch of the decision tree, and is calculated as:
 # MAGIC $$ G = Entropy (parent) - Entropy (child) $$
-
-# COMMAND ----------
-
-displayHTML("<img src ='files/Decision_Tree_Building.png/'>")
-
-# COMMAND ----------
-
-displayHTML("<img src ='files/Drafts/Decision_Tree_toy_example.jpg/'>")
+# MAGIC 
+# MAGIC ##### Based on the information gain from the diagram above, the best feature to split on is Origin.
 
 # COMMAND ----------
 
@@ -1140,21 +1140,6 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 
 # COMMAND ----------
 
-# Debug - to remove
-[[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group]
-
-# COMMAND ----------
-
-# Debug - to remove
-train_combiner.groupBy('label').count().toPandas()["count"].to_list()
-
-# COMMAND ----------
-
-# Debug - to remove
-train_group[6].show(4, truncate=False)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC #### Train first-level classifiers
 
@@ -1166,31 +1151,43 @@ train_group[6].show(4, truncate=False)
 # COMMAND ----------
 
 from pyspark.ml.classification import RandomForestClassifier
-from multiprocessing.pool import ThreadPool
+# from multiprocessing.pool import ThreadPool
 
-# allow up to 10 concurrent threads
-pool = ThreadPool(10)
+# # allow up to 10 concurrent threads
+# pool = ThreadPool(10)
 
-# You can increase the timeout for broadcasts. Default is 300 s
-spark.conf.set('spark.sql.broadcastTimeout', '900000ms')
-spark.conf.get('spark.sql.broadcastTimeout')
+# # You can increase the timeout for broadcasts. Default is 300 s
+# spark.conf.set('spark.sql.broadcastTimeout', '900000ms')
+# spark.conf.get('spark.sql.broadcastTimeout')
 
 # COMMAND ----------
 
-def TrainEnsembleModels(en_train, featureIndexer, classifier) :
-  job = []
-  for num, _ in enumerate(en_train):
-      print("Create ensemble model : " + str(num))      
-      # Chain indexer and classifier in a Pipeline 
-      job.append(Pipeline(stages=[featureIndexer, classifier]))
+# def TrainEnsembleModels(en_train, featureIndexer, classifier) :
+#   job = []
+#   for num, _ in enumerate(en_train):
+#       print("Create ensemble model : " + str(num))      
+#       # Chain indexer and classifier in a Pipeline 
+#       job.append(Pipeline(stages=[featureIndexer, classifier]))
       
-  return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
+#   return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
+      
+# ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
+#                     # Type of model we can use.
+#                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
+#                    )
+# print("Training done")
+
+def TrainEnsembleModels(en_train, featureIndexer, classifier) :
+  model = []
+  for num, train in enumerate(en_train):
+      print("Create ensemble model : " + str(num))      
+      model.append(Pipeline(stages=[featureIndexer, classifier]).fit(train))
+  return model
       
 ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
                     # Type of model we can use.
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
                    )
-print("Training done")
 
 # COMMAND ----------
 
@@ -1293,9 +1290,9 @@ def do_transform_final(df) :
     )
   
 reduced_df = assemble_dataframe(ensemble_prediction)
-reduced_df.show(2)
+#reduced_df.show(2)
 ensemble_transformed = do_transform_final(reduced_df)
-ensemble_transformed.show(2) 
+#ensemble_transformed.show(2) 
 
 # COMMAND ----------
 
@@ -1345,6 +1342,82 @@ def FinalEnsmblePipeline(model_comb, model_group, data) :
       )
     )
   )
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC #### Model selection
+
+# COMMAND ----------
+
+['model 0', 'model 1', 'model 2', 'model 3', 'model 4', 'model 5', 'model 6', 'model 7',  'model 8']
+[ "model {}".format(s) for s in range(0, 9)]
+
+# COMMAND ----------
+
+# fig = go.Figure()
+
+# fig.add_trace(go.Bar(
+#   #x=['model 0', 'model 1', 'model 2', 'model 3', 'model 4', 'model 5', 'model 6', 'model 7',  'model 8'],
+#   x= [ "model {}".format(s) for s in range(0, 9)],
+#   y=list(model_trained_ensemble_rf.stages[-1].featureImportances.toArray()),
+#   marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
+#   name = '',
+#   showlegend = False,
+# ))
+
+# fig.update_layout(xaxis_tickangle=-45)
+# fig.update_layout(barmode='stack', 
+#                   xaxis=dict(categoryorder='total descending', title='Models'), 
+#                   title=go.layout.Title(text="Second level model selection (Random forest)"),  
+#                   yaxis=dict(title='Importance'))
+# fig.update_layout(height=500, width=500)
+
+# fig.show()
+
+
+from collections import defaultdict
+
+def makedict(em, columns, features):
+    plot = defaultdict(dict)
+    rows = int(len(em)/columns)
+    for num, m in enumerate(em):
+        plot[num]['importance'] = em
+        plot[num]['features']   = features
+        plot[num]['x_pos']      = int(num/columns)+1
+        plot[num]['y_pos']      = num%columns+1
+        plot[num]['title']      = "ensemble model {}".format(num)
+    return plot, rows, columns
+
+plt, rows, columns = makedict([
+  model_trained_ensemble_lr.stages[-1].coefficients.toArray(), 
+  model_trained_ensemble_svm, 
+  list(m.stages[-1].featureImportances.toArray())], 
+  columns=3, 
+  features=[ "model {}".format(s) for s in range(0, 9)])
+
+print (rows, columns)
+
+
+# fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
+
+# for key, value in plt.items() :
+#     fig.add_trace(go.Bar(
+#       x=plt[key]['features'],
+#       y=plt[key]['importance'],
+#       marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
+#       name = '',
+#       showlegend = False,
+#     ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    
+#     fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+#     fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+#     if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+#     fig.update_xaxes(tickangle=-45)
+    
+# fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles")
+# fig.update_layout(xaxis_tickangle=-45)
+# fig.show()
 
 # COMMAND ----------
 
