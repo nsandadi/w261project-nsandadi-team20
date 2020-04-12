@@ -12,44 +12,37 @@
 # MAGIC 
 # MAGIC As we've all probably experienced at some point in our lives, air travel is never easy. Whether you're the person getting on a flight traveling around the world, the folks in the air traffic control towers orchestrating incoming and outgoing flights, or the airports and airlines trying their best to effectively coordinate flights at every hour of every day of every year, so much can go wrong. The delays alone are enough to completely derail anyone's plans and trigger a cascading effect of consequences down the line as delays continue to stack up on top of each other over the course of time. And the biggest problem is that these delays often occur when we least expect them and at the worst possible times.
 # MAGIC 
-# MAGIC To attempt to solve this problem, we introduce the *Airline Delays* dataset, a dataset of US domestic flights from 2015 to 2019 collected by the Bureau of Transportation Statistics for the purpose of studying airline delays. For this analysis, we will primarily use this dataset to study the nature of airline delays in the united states over the last few years, with the ultimate goal of developing models for predicting significant flight departure delays (30 minutes or more) in the United States. 
+# MAGIC To attempt to solve this problem, we introduce the *Airline Delays* dataset, a dataset of US domestic flights from 2015 to 2019 collected by the Bureau of Transportation Statistics for the purpose of studying airline delays. For this analysis, we will primarily use this dataset to study the nature of airline delays in the United States over the last few years, with the ultimate goal of developing models for predicting significant flight departure delays (30 minutes or more) in the United States. 
 # MAGIC 
 # MAGIC In developing such models, we seek to answer the core question, **"Given known information prior to a flight's departure, can we predict departure delays and identify the likely causes of such delays?"**. In the last few years, about 11% of all US domestic flights resulted in significant delays, and answering these questions can truly help us to understand why such delays happen. In doing so, not only can airlines and airports start to identify likely causes and find ways to mitigate them and save both time and money, but air travelers also have the potential to better prepare for likely delays and possibly even plan for different flights in order to reduce their chance of significant delay. 
 # MAGIC 
-# MAGIC To effectively investigate this question and produce a practically useful model, we will aim to develop a model that performs better than a baseline model that predicts the majority class of 'no delay' every time (this would have an accuracy of 89%). Having said that, we have been informed by our instructors that the state of the art is 85% accuracy, but will proceed to also prioritize model interpretability along side model performance metrics to help address our core question. Given the classification nature of this problem, we will concentrate on improving metrics such as precision, recall, F1, and area under curve (AUC) over our baseline model. We will also concentrate on producing models that can explain what features of flights known prior to departure time can best predict departure delays and from these, attempt to best infer possible causes of departure delays. 
+# MAGIC To effectively investigate this question and produce a practically useful model, we will aim to develop a model that performs better than a baseline model that predicts the majority class of 'no delay' every time (this would have an accuracy of 89%). Having said that, we have been informed by our instructors that the state of the art is 85% accuracy, but will proceed to also prioritize model interpretability along side model performance metrics to help address our core question. Given the classification nature of this problem, we will concentrate on improving metrics such as precision, recall, F1, area under ROC, and area under PR curve, over our baseline model. We will also concentrate on producing models that can explain what features of flights known prior to departure time can best predict departure delays and from these, attempt to best infer possible causes of departure delays. 
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Importing Dependencies
-
-# COMMAND ----------
-
-# MAGIC %sh 
-# MAGIC pip install plotly --upgrade
-
-# COMMAND ----------
-
+# DBTITLE 1,Import Pyspark ML Dependencies (Hide)
 from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql.functions import col
 from pyspark.sql.functions import when
-
-
-from pyspark.ml.feature import VectorIndexer
+from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.functions import udf
 
 from pyspark.ml import Pipeline
-from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
-from pyspark.ml.feature import OneHotEncoderEstimator
-
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.classification import DecisionTreeClassifier
 from pyspark.ml.classification import NaiveBayes
 from pyspark.ml.classification import LinearSVC
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.ml.feature import Bucketizer, StringIndexer, VectorIndexer, VectorAssembler, OneHotEncoderEstimator
+
 from pyspark.mllib.evaluation import MulticlassMetrics
 
+# COMMAND ----------
+
+# DBTITLE 1,Import Plotly Dependencies (Hide)
+# MAGIC %sh 
+# MAGIC pip install plotly --upgrade
 
 # COMMAND ----------
 
@@ -64,67 +57,81 @@ from plotly.subplots import make_subplots
 # MAGIC ## II. EDA & Discussion of Challenges
 # MAGIC 
 # MAGIC ### Dataset Introduction
-# MAGIC The Bureau of Transporation Statistics provides us with a wide variety of features relating to each flight in the *Airline Delays* dataset, ranging from features about the scheduled flight such as the planned departure, arrival, and elapsed times, the planned distance, the carrier and airport information, information regarding the causes of certain delays for the entire flight, as well as the amounts of delay (for both flight departure and arrival), among many other features. 
+# MAGIC The Bureau of Transporation Statistics provides us with a wide variety of features relating to each flight in the *Airline Delays* dataset. These features range from features about the scheduled flight such as the planned departure, arrival, and elapsed times, the planned distance, the carrier and airport information, information regarding the causes of certain delays for the entire flight, as well as the amounts of delay (for both flight departure and arrival), among many other features. 
 # MAGIC 
-# MAGIC Given that for this analysis, we will be concentrating on predicting and identify the likely causes of departure delays before any such delay happens, we will primarily concentrate our EDA and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
+# MAGIC Given that for this analysis, we will be concentrating on predicting and identify the likely causes of departure delays before any such delay happens, we will primarily concentrate our EDA, feature engineering, and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
 # MAGIC 
-# MAGIC * **Time of year** (e.g. `Year`, `Month`, `Day_Of_Month`, `Day_Of_Week`)
-# MAGIC * **Airline Carrier** (e.g. `Op_Unique_Carrier`)
-# MAGIC * **Origin & Destination Airports** (e.g. `Origin`, `Dest`)
-# MAGIC * **Scheduled Departure & Arrival Times** (e.g. `CRS_Dep_Time`, `CRS_Arr_Time`)
-# MAGIC * **Planned Elapsed Times & Distances** (e.g. `CRS_Elapsed_Time`, `Distance`, `Distance_Group`)
+# MAGIC * **Time of year / Flight Date** 
+# MAGIC     - `Year`: The year in which the flight occurs (range: [2015, 2019])
+# MAGIC     - `Month`: A numerical indicator for the month in which the flight occurs (range: [1, 12], 1 corresponds to January)
+# MAGIC     - `Day_Of_Month`: The day of the month in which the flight occurs (range: [1, 31])
+# MAGIC     - `Day_Of_Week`: A numerical indiciator for the day of the week in which the flight occurs (range: [1, 7], 1 corresponds to Monday)
+# MAGIC * **Scheduled Departure & Arrival Times**
+# MAGIC     - `CRS_Dep_Time`: The scheduled departure time of the flight (range: (0, 2400], 100 corresponds to 1AM departure time)
+# MAGIC     - `CRS_Arr_Time`: The scheduled arrival time of the flight (range: (0, 2400], 100 corresonds to 1AM arrival time)
+# MAGIC * **Planned Elapsed Times & Distances**
+# MAGIC     - `CRS_Elapsed_Time`: The scheduled elapsed time (in minutes) of the flight (continuous variable, 60 corresponds to 1 hour elapsed time)
+# MAGIC     - `Distance`: The planned distance (in miles) for the flight distance from origin to destination airports (continuous variable, e.g. 2475 miles)
+# MAGIC     - `Distance_Group`: A binned version of the `Distance` variable into integer bins (range: [1, 11], e.g. 2475 miles maps to a distance group of 10)
+# MAGIC * **Airline Carrier**
+# MAGIC     - `Op_Unique_Carrier`: A shortcode denoting the airline carrier that operated the flight (categorical, 19 distinct carriers, e.g. 'AS' corresponds to Alaska Airlines, more mappings of airlines codes can be found here: https://www.bts.gov/topics/airlines-and-airports/airline-codes) 
+# MAGIC * **Origin & Destination Airports** 
+# MAGIC     - `Origin`: A shortcode denoting the origin airport from which the plane took off (categorical, 364 distinct airports, e.g. 'SFO' corresponds to San Francisco International Airport, more mappings of airport codes can be found here: https://www.bts.gov/topics/airlines-and-airports/world-airport-codes)
+# MAGIC     - `Dest`: A shortcode denoting the destination airport at which the plane landed (categorical, 364 distinct airports, same in construct as `Origin`)
 # MAGIC 
-# MAGIC Additionally, we will use the variable `Dep_Delay` to define our outcome variable for "significiant" departure delays (i.e. delays of 30 minutes or more). Finally, we will focus our analysis to the subset of flights that are not diverted, are not cancelled and have non-null values for departure delays to ensure that we can accurately predict departure delays for flights. this will still leave us with a significant number of records to work with for the purpose of training and model development. Below are a few example flights taken from the *Airline Delays* dataset that we will use for our analysis.
+# MAGIC We will prioritize working with these features in the next few sections. Additionally, we will use the variable `Dep_Delay` (which describes the amount of departure delay in minutes) to define our outcome variable for "significiant" departure delays (i.e. delays of 30 minutes or more). These significant delays will be encoded in the variable `Dep_Del30`, a 0/1 indicator for whether the flight was delayed, which we will append to the dataset below. Finally, we will focus our analysis to the subset of flights that are not diverted, are not cancelled, and have non-null values for departure delays to ensure that we can accurately predict departure delays for flights. This subset will still leave us with a significant number of records to work with for the purpose of training and model development. 
+# MAGIC 
+# MAGIC Below are a few example flights taken from the *Airline Delays* dataset that we will use for our analysis.
 
 # COMMAND ----------
 
+# DBTITLE 1,Examples Records from Airline Delays Dataset (Hide code)
 def LoadAirlineDelaysData():
   # Read in original dataset
   airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/data/datasets_final_project/parquet_airlines_data/201*.parquet")
-  print("Number of records in original dataset:", airlines.count())
 
   # Filter to datset with entries where diverted != 1, cancelled != 1, and dep_delay != Null
   airlines = airlines.where('DIVERTED != 1') \
                      .where('CANCELLED != 1') \
                      .filter(airlines['DEP_DELAY'].isNotNull()) 
-
-  print("Number of records in reduced dataset: ", airlines.count())
   return airlines
-
-airlines = LoadAirlineDelaysData()
-
-# COMMAND ----------
 
 # Generate other Departure Delay outcome indicators for n minutes
 def CreateNewDepDelayOutcome(data, thresholds):
   for threshold in thresholds:
+    if ('Dep_Del' + str(threshold) in data.columns):
+      print('Dep_Del' + str(threshold) + " already exists")
+      continue
     data = data.withColumn('Dep_Del' + str(threshold), (data['Dep_Delay'] >= threshold).cast('integer'))
   return data  
-  
-# Generate Dep_Del30 outcome variable
+
+# Load data & define outcome variable
+airlines = LoadAirlineDelaysData()
 airlines = CreateNewDepDelayOutcome(airlines, [30])
 
-# COMMAND ----------
+print(airlines.columns)
 
+# Filter dataset to variables of interest
 outcomeName = 'Dep_Del30'
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
 catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 joiningFeatures = ['FL_Date'] # Features needed to join with the holidays dataset--not needed for training
+airlines = airlines.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames + joiningFeatures)
 
-airlines = airlines.select([outcomeName] + numFeatureNames + catFeatureNames + joiningFeatures)
-
-# COMMAND ----------
-
-# Print examples of flights
-display(airlines.take(6))
+# Display a small sample of flight records
+display(airlines.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames).sample(fraction=0.0001, seed=6).take(10))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirety of flights from the year 2019 and use the years 2015-2018 for training. This way, we will simulate the conditions for training a model that will predict departure delays for future flights. 
+# MAGIC Note that because we are interested in predicting departure delays for future flights, we will define our test set to be the entirety of flights from the year 2019 and use the years 2015-2018 for feature engineering and model development (training & validation sets). This way, we will simulate the conditions for training a model that will predict departure delays for future flights. This will leave about 23% of the data for testing and the remaining 77% for training & validation. 
+# MAGIC 
+# MAGIC Additionally, in this section and the next section on feature engineering, we'll mainly be operating on distinct columns of the dataset at any given time. In order to help with scalability of our explorations and preprocessing, we will save these dataset splits to parquet files in the cluster, as parquet is optimized for column-wise storage and thus will help improve the performance of our column-wise analysis of the *Airlines Delays* dataset. We will also focus our EDA on the union of training & validation sets, to ensure our decisions are not influenced by the test set.
 
 # COMMAND ----------
 
+# DBTITLE 1,Split, Save, & Reload Dataset from parquet (hide code & result)
 def SplitDataset(airlines):
   # Split airlines data into train, dev, test
   test = airlines.where('Year = 2019') # held out
@@ -140,10 +147,6 @@ def SplitDataset(airlines):
   
   return (mini_train, train, val, test) 
 
-mini_train, train, val, test = SplitDataset(airlines)
-
-# COMMAND ----------
-
 # Write train & val data to parquet for easier EDA
 def WriteAndRefDataToParquet(data, dataName):
   # Write data to parquet format (for easier EDA)
@@ -152,12 +155,27 @@ def WriteAndRefDataToParquet(data, dataName):
   # Read data back directly from disk 
   return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
 
+# Split dataset into training/validation/test; use mini_train to help with quick testing
+mini_train, train, val, test = SplitDataset(airlines)
+
+# Save and reload datasets for more efficient EDA & feature engineering
+mini_train = WriteAndRefDataToParquet(mini_train, 'mini_train')
+train = WriteAndRefDataToParquet(train, 'train')
+val = WriteAndRefDataToParquet(val, 'val')
+test = WriteAndRefDataToParquet(test, 'test')
 train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Explanation for why we chose the variables we chose (rationale for why not all variables are available at inference time)
+# MAGIC ### Prospective Models for the Departure Delay Classification Task
+# MAGIC Before we go into detail on our core EDA tasks, we'd like to introduce the models we will be considering in section IV to motivate our discussion. At a high level, we will be considering the set of models that include the following:
+# MAGIC * Decision Trees
+# MAGIC * Logistic Regression
+# MAGIC * Naive Bayes
+# MAGIC * Support Vector Machines
+# MAGIC 
+# MAGIC Given that our task for this analysis is to classify flights as delayed (1) or not delayed (0), we want to ensure that the models we consider are well suited for classification tasks, which all four of these models are good at. Additionally, since we'll be interested in looking at explainable models to help inform why certain flights are delayed over others, we consider Decision Trees, Logistic Regression, and Naive Bayes explicitly for this task, whereas Support Vector Machines are not as well-suited for explainability. We will discuss these models in more detail in section IV when we discuss our algorithm exploration. With that said, we'll keep these models in mind as we explore our core EDA tasks.
 
 # COMMAND ----------
 
@@ -177,23 +195,82 @@ train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Prospective Models for the Departure Delay Classification Task
-# MAGIC To motivate our EDA in this section for scalability investigation, we will keep in mind the following models, which we will explore in more detail in section IV:
-# MAGIC * Logistic Regression
-# MAGIC * Decision Trees
-# MAGIC * Naive Bayes
-# MAGIC * Support Vector Machines
+# MAGIC ### EDA Task #1: Exploring & Binning Continuous Features
+# MAGIC Among the features that we have to consider for predicting departure delays, we have 4 that are relatively continuous and can take on thousands of different values: `CRS_Dep_Time`, `CRS_Arr_Time`, `CRS_Elapsed_Time`, and `Distance`. Let's primarily focus on the variable `CRS_Elapsed_Time` to motivate this discussion and we'll generalize it to the remaining 3 variables. Below is a plot showing the bulk of the distribution for the feature `CRS_Elapsed_Time`.
+
+# COMMAND ----------
+
+# Helper Function for plotting distinct values of feature on X and number of flights on Y, categorized by outocme variable
+def MakeRegBarChart(full_data_dep, outcomeName, var, orderBy, barmode, xtype, xrange=None, yrange=None):
+  if (orderBy):
+      d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().orderBy(orderBy).toPandas()
+  else:
+    d = full_data_dep.select(var, outcomeName).groupBy(var, outcomeName).count().toPandas()
+
+  t1 = go.Bar(
+    x = d[d[outcomeName] == 0.0][var],
+    y = d[d[outcomeName] == 0.0]["count"],
+    name=outcomeName + " = " + str(0.0)
+  )
+  t2 = go.Bar(
+    x = d[d[outcomeName] == 1.0][var],
+    y = d[d[outcomeName] == 1.0]["count"],
+    name=outcomeName + " = " + str(1.0)
+  )
+
+  l = go.Layout(
+    barmode=barmode, 
+    title="Flight Counts by " + var + " & " + outcomeName,
+    xaxis=dict(title=var, type=xtype, range=xrange),
+    yaxis=dict(title="Number of Flights", range=yrange)
+  )
+  fig = go.Figure(data=[t1, t2], layout=l)
+  fig.show()
+
+var = 'CRS_Elapsed_Time'
+MakeRegBarChart(train_and_val, outcomeName, var, orderBy=var, barmode='stack', xtype='linear', xrange=[0, 450])
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### EDA Task #1: Exploring Scheduled Departure & Arrival Times
+# MAGIC From the plot above, we again see the continuous nature of `CRS_Elapsed_Time`, with the majortiy of flights ranging between 50 to 200 minutes. Note that each of the taller bars correspond to flight durations at the 5-minute markers (60, 65, 70, etc), as these are more "convenient" flight durations to work with. 
+# MAGIC 
+# MAGIC Now, if we consider the possible values that `CRS_Elapsed_Time` can intrinsically take on, it can be any number of minutes that the flight is scheduled to take; these could be values such as 60 minutes, 65 minutes, 120 minutes, even going onto 400 minutes in some cases, as evident above. Conceptually speaking, some of these times are drasticaly different (60 minutes vs. 400 minutes), while others are similar enough that they would be considered the same flight duration (60 minutes vs. 65 minutes). Because of this, 
+# MAGIC 
+# MAGIC 
 # MAGIC * There are a lot of unique departure & arrival times that are numerical features, but the time 2300 isn't much different from 2305 to 2310
 # MAGIC * May be worthwhile to bin things
 # MAGIC     - fewer splits for decision tree to consider
 # MAGIC     - can estimate effects of unique time blocks departure delays (more meaningful/interpretable)
 # MAGIC     - do have more coefficients to estimate in LR (1 for each bin value)
 # MAGIC * Show barplots of delay/no delay distributions for numerical values and binned values (maybe even show ordered by probability of departure delay--Diana EDA)
+
+# COMMAND ----------
+
+# Augments the provided dataset for the given variable with binned/bucketized
+# versions of that variable, as defined by splits parameter
+# Column name suffixed with '_bin' will be the bucketized column
+# Column name suffixed with '_binlabel' will be the nicely-named version of the bucketized column
+def BinValuesForEDA(df, var, splits, labels):
+  # Bin values
+  bucketizer = Bucketizer(splits=splits, inputCol=var, outputCol=var + "_bin")
+  df_buck = bucketizer.setHandleInvalid("keep").transform(df)
+  
+  # Add label column for binned values
+  bucketMaps = {}
+  bucketNum = 0
+  for l in labels:
+    bucketMaps[bucketNum] = l
+    bucketNum = bucketNum + 1
+  
+  callnewColsUdf = udf(lambda x: bucketMaps[x], StringType())  
+  return df_buck.withColumn(var + "_binlabel", callnewColsUdf(F.col(var + "_bin")))
+
+# Make plot with binned version of CRS_Elapsed_Time
+d = BinValuesForEDA(train_and_val, var, 
+                    splits = [float("-inf"), 60, 120, 180, 240, 300, 360, float("inf")], 
+                    labels = ['0-1 hour', '1-2 hours', '2-3 hours', '3-4 hours', '4-5 hours', '5-6 hours', '6+ hours'])
+MakeRegBarChart(d, outcomeName, var + "_binlabel", orderBy=var + "_binlabel", barmode='stack', xtype='category')
 
 # COMMAND ----------
 
@@ -608,37 +685,10 @@ briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
 
 # COMMAND ----------
 
-airlines = WriteAndRefDataToParquet(airlines, 'augmented')
-
-# COMMAND ----------
-
-# Regenerate splits & save & reference
-mini_train, train, val, test = SplitDataset(airlines)
-mini_train = WriteAndRefDataToParquet(mini_train, 'augmented_mini_train')
-train = WriteAndRefDataToParquet(train, 'augmented_train')
-val = WriteAndRefDataToParquet(val, 'augmented_val')
-test = WriteAndRefDataToParquet(test, 'augmented_test')
-
-# COMMAND ----------
-
-# Write data to avro for easier row-wise training
-def WriteAndRefDataToAvro(data, dataName):
-  # Write data to avro format
-  data.write.mode('overwrite').format("avro").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
-  
-  # Read data back directly from disk 
-  return spark.read.format("avro").load(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
-
-mini_train_avro = WriteAndRefDataToAvro(mini_train, 'augmented_mini_train')
-train_avro = WriteAndRefDataToAvro(train, 'augmented_train')
-val_avro = WriteAndRefDataToAvro(val, 'augmented_val')
-test_avro = WriteAndRefDataToAvro(test, 'augmented_test')
-
-# COMMAND ----------
-
 print("All Available Features:")
 print("------------------------")
 print(" - Numerical Features: \t\t", numFeatureNames) # numerical features
+print(" - Cont. Numerical Features:\t", contNumFeatureNames) # numerical features, but have binned versions in binFeatureNames
 print(" - Categorical Features: \t", catFeatureNames) # categorical features
 print(" - Binned Features: \t\t", binFeatureNames) # numerical features
 print(" - Interaction Features: \t", intFeatureNames) # categorical features
@@ -653,6 +703,35 @@ print(" - Brieman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC - Describe SMOTE, show visuals from slides, show core parts of SMOTE algorithm (get neighbors, generate synthetic, the RDD-based code) but don't run the code; just load the data
 # MAGIC     - Link to notebook where the smoted dataset was actually generated
 # MAGIC - Describe Majority Class splitting (high-level with pictures from slides), say we'll use this in for stacking in ensemble approach later on
+
+# COMMAND ----------
+
+# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
+# Read prepared data from parquet for training
+def ReadDataFromParquet(data, dataName):
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
+airlines = ReadDataFromParquet(airlines, 'augmented')
+mini_train = ReadDataFromParquet(mini_train, 'augmented_mini_train')
+train = ReadDataFromParquet(train, 'augmented_train')
+val = ReadDataFromParquet(val, 'augmented_val')
+test = ReadDataFromParquet(test, 'augmented_test')
+
+###########################################
+# Define all variables for easy reference #
+###########################################
+
+# Numerical Variables to use for training
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
+holFeatureNames = ['Holiday']
+orgFeatureNames = ['Origin_Activity']
+briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
 
 # COMMAND ----------
 
@@ -747,10 +826,9 @@ def PredictAndEvaluate(model, data, dataName, outcomeName, algorithm):
 # COMMAND ----------
 
 # Model Evaluation
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
-
-
+import pandas as pd
 # Evaluates model predictions for the provided predictions
 # Predictions must have two columns: prediction & label
 def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
@@ -771,17 +849,14 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
     precision = 0 if ((metric['TP'] + metric['FP']) == 0) else metric['TP'] /(metric['TP'] + metric['FP'])
     recall = 0 if ((metric['TP'] + metric['FN']) == 0) else metric['TP'] /(metric['TP'] + metric['FN'])
     fscore = 0 if (precision+recall) == 0 else 2 * precision * recall /(precision+recall)
-    # Compute Area under ROC
+    # Compute Area under ROC & PR Curve
     evaluator = BinaryClassificationEvaluator(rawPredictionCol="rawPrediction", labelCol=outcomeName)
-    areaUnderROC = evaluator.evaluate(predict_df)
-    # Compute Area under Precision-Recall
-    evaluator = BinaryClassificationEvaluator(labelCol = outcomeName, rawPredictionCol = "rawPrediction", metricName = "areaUnderPR")
-    areaUnderPR = evaluator.evaluate(predict_df)
-    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}, AreaUnderPR = {}".format(
-        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPR, 7) ))
-    print("\nConfusion matrix :")
-    print(evaluation_df.drop("metric", axis =1))
-    print("\n")
+    areaUnderROC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderROC"})
+    areaUnderPRC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderPR"})
+    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}, AreaUnderPRC = {}".format(
+        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPRC, 7))),
+    print("\nConfusion Matrix:\n", pd.DataFrame.from_dict(metric, orient='index', columns=['count']), '\n')
+
 def PredictAndEvaluate(model, data, dataName, outcomeName):
   predictions = model.transform(data)
   EvaluateModelPredictions(predictions, dataName, outcomeName)
@@ -793,11 +868,11 @@ algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
   if algorithm == 'svm':
     titleName = dataName+ ' with ' + algorithm
-    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
     PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName)
   else:
     titleName = dataName+ ' with ' + algorithm
-    tr_model = train_model(mini_train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
     PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
 
 # COMMAND ----------
@@ -1054,6 +1129,8 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 # COMMAND ----------
 
 # MAGIC %md 
+# MAGIC Ensamble approach can be used to address the imbalanced training data problem. The approaches such as SMORT has scalability issues and ensamble approach try to overcome practical issues. The negative effects of imbalance can be avoided with out replicating the minority class and with out discarding information from majority class. In this approach, individual components of the ensemble with a balanced learning sample. Working in this way, it is possible to appropriately handle the difficulties of the imbalance, while avoiding the drawbacks inherent to the oversampling and undersampling techniques.
+# MAGIC 
 # MAGIC Stacking is a general framework that involves training a learning algorithm to combine the predictions of several other learning algorithms to make a final prediction. Stacking can be used to handle an imbalanced dataset. The steps can be outlined as below.  
 # MAGIC (a) Group the **training** data into majority and minority class.   
 # MAGIC (b) Split the  majority class into \\(N + 1\\) groups, each group containing same number of data points as that in minority class.    
@@ -1065,38 +1142,56 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 
 # MAGIC %md
 # MAGIC #### Transform data for Ensemble
-# MAGIC Do assembler transformation before train test split for `VectorIndexer` to work 
+# MAGIC 
+# MAGIC First, the airline data is transformed and feature indexer is calculated.  Do assembler transformation before train test split for `VectorIndexer` to work 
 
 # COMMAND ----------
 
-def TransformDataForEnsemble(full_dataset):
+mini_train.columns
 
-  # Convert strings to index
-  str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"]]
+# COMMAND ----------
+
+# def TransformDataForEnsemble(full_dataset):
+
+#   # Convert strings to index
+#   str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"]]
+#   target       = ["Dep_Del30"]
+#   all_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin', "Op_Unique_Carrier_index", "Origin_index", "Dest_index", "Holiday_index", "Origin_Activity"]
+  
+#   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
+#   ensemble_pipeline = Pipeline(stages=str_indexers + [assembler])
+  
+#   transformed_data =  (ensemble_pipeline
+#           .fit(full_dataset)
+#           .transform(full_dataset)
+#           .select(["Year", "features"] + target)
+#           .withColumnRenamed("Dep_Del30", "label"))
+  
+#   # Here, create automatic Categories. All variables > 400 Categories will be treated as Continuous.
+#   # else will be treated as Categories by random forest.
+#   featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(transformed_data)
+  
+#   return all_features, featureIndexer, transformed_data
+
+#all_ensemble_features, ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
+
+def TransformDataForEnsemble(train_data, val_data, test_data) :
   target       = ["Dep_Del30"]
   all_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin', "Op_Unique_Carrier_index", "Origin_index", "Dest_index", "Holiday_index", "Origin_Activity"]
   
-  assembler = VectorAssembler(inputCols=all_features, outputCol="features")
-  ensemble_pipeline = Pipeline(stages=str_indexers + [assembler])
-  
-  transformed_data =  (ensemble_pipeline
-          .fit(full_dataset)
-          .transform(full_dataset)
-          .select(["Year", "features"] + target)
-          .withColumnRenamed("Dep_Del30", "label"))
-  
-  # Here, create automatic Categories. All variables > 400 Categories will be treated as Continuous.
-  # else will be treated as Categories by random forest.
-  featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(transformed_data)
-  
-  return all_features, featureIndexer, transformed_data
 
-all_ensemble_features, ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
+
 
 # COMMAND ----------
 
-# Debug - to remove
+print(all_ensemble_features) # Show all features that are used in Ensemble.
+# Print the transformed dataframe.
 ensemble_transformed_data.show(4, truncate=False)
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC Split data into train and test, after appling VectorIndexer.
 
 # COMMAND ----------
 
@@ -1145,6 +1240,16 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC Check for data set balancing
+
+# COMMAND ----------
+
+([[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group], 
+ train_combiner.groupBy('label').count().toPandas()["count"].to_list())
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Train first-level classifiers
 
@@ -1156,27 +1261,28 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 # COMMAND ----------
 
 from pyspark.ml.classification import RandomForestClassifier
-# from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import ThreadPool
 
-# # allow up to 10 concurrent threads
-# pool = ThreadPool(10)
+# allow up to 10 concurrent threads
+pool = ThreadPool(10)
 
-# # You can increase the timeout for broadcasts. Default is 300 s
-# spark.conf.set('spark.sql.broadcastTimeout', '900000ms')
-# spark.conf.get('spark.sql.broadcastTimeout')
+# You can increase the timeout for broadcasts. Default is 300 s
+spark.conf.set('spark.sql.broadcastTimeout', '900000ms')
+spark.conf.get('spark.sql.broadcastTimeout')
 
 # COMMAND ----------
 
-# def TrainEnsembleModels(en_train, featureIndexer, classifier) :
-#   job = []
-#   for num, _ in enumerate(en_train):
-#       print("Create ensemble model : " + str(num))      
-#       # Chain indexer and classifier in a Pipeline 
-#       job.append(Pipeline(stages=[featureIndexer, classifier]))
+def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
+  job = []
+  for num, _ in enumerate(en_train):
+      print("Create ensemble model : " + str(num))      
+      # Chain indexer and classifier in a Pipeline 
+      job.append(Pipeline(stages=[featureIndexer, classifier]))
       
-#   return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
-      
-# ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
+  return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
+
+# Parallel training is not done in databricks environment.      
+# ensemble_model = TrainEnsembleModels_parallel(train_group, ensamble_featureIndexer, 
 #                     # Type of model we can use.
 #                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
 #                    )
@@ -1300,6 +1406,10 @@ ensemble_transformed = do_transform_final(reduced_df)
 
 # COMMAND ----------
 
+reduced_df.show(2)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Learn a second-level classifier based on training set from first-level.
 
@@ -1409,15 +1519,11 @@ fig.show()
 
 # COMMAND ----------
 
-for (name, models)  in [("Logistic regression", model_trained_ensemble_lr), ("Logistic regression", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
-  print(name, models)
-# ensemble_test_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_test)
-# EvaluateModelPredictions(ensemble_test_prediction, dataName='test')
-
-# COMMAND ----------
-
-ensemble_val_prediction = FinalEnsmblePipeline(model_trained_ensemble, ensemble_model, ensemble_val)
-EvaluateModelPredictions(ensemble_val_prediction, dataName='validation')
+for (l2_name, l2_model)  in [("Logistic regression", model_trained_ensemble_lr), ("SVM", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
+  for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
+      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, ensemble_model, data)
+      EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name)
 
 # COMMAND ----------
 
