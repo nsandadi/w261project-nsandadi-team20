@@ -679,3 +679,219 @@ MakeProbBarChart(d, outcomeName, var, xtype='category', numDecimals=10)
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC ### Day_Of_Week interacted with binned CRS_Dep_Time & Dep_Del30
+
+# COMMAND ----------
+
+dow_dtime_df = full_data_dep[['DAY_OF_WEEK', 'CRS_DEP_TIME', 'DEP_DEL30']].toPandas()
+print(dow_dtime_df.shape)
+
+dow_dtime_df['crs_dep_binned'] = pd.cut(x = dow_dtime_df['CRS_DEP_TIME'], bins = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+
+dow_dtime_df['dayOfWeek_binned'] = pd.cut(x = dow_dtime_df['DAY_OF_WEEK'], bins = [0, 1, 2, 3, 4, 5 , 6, 7], labels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+
+dow_dtime_binned_df = dow_dtime_df[['crs_dep_binned', 'dayOfWeek_binned', 'DEP_DEL30']].groupby(['crs_dep_binned', 'dayOfWeek_binned'], as_index = False).count()
+
+# COMMAND ----------
+
+import plotly.offline as py
+import plotly.graph_objs as go
+
+trace1 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Monday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Monday'
+    
+)
+trace2 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Tuesday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Tuesday'
+)
+
+trace3 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Wednesday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Wednesday'
+    
+)
+trace4 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Thursday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Thursday'
+)
+
+trace5 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Friday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Friday'
+    
+)
+
+trace6 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Saturday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Saturday'
+)
+
+trace7 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_dtime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Sunday'].groupby('crs_dep_binned').sum()['DEP_DEL30'].tolist(),
+    name='Sunday'
+)
+
+data = [trace1, trace2, trace3, trace4, trace5, trace6, trace7]
+layout = go.Layout(
+    barmode='group', 
+    title="Day_Of_Week interacted with binned CRS_Dep_Time & Dep_Del30",
+    xaxis=dict(title="Binned CRS Departure Time", type='category'),
+    yaxis=dict(title="Number of Delays")
+)
+
+fig = go.Figure(data=data, layout=layout)
+py.iplot(fig)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Day_Of_Week interacted with binned CRS_Arr_Time & Dep_Del30
+
+# COMMAND ----------
+
+dow_atime_df = full_data_dep[['DAY_OF_WEEK', 'CRS_ARR_TIME', 'DEP_DEL30']].toPandas()
+print(dow_atime_df.shape)
+
+dow_atime_df['crs_arr_binned'] = pd.cut(x = dow_atime_df['CRS_ARR_TIME'], bins = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], labels = ['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'])
+
+dow_atime_df['dayOfWeek_binned'] = pd.cut(x = dow_atime_df['DAY_OF_WEEK'], bins = [0, 1, 2, 3, 4, 5 , 6, 7], labels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+
+dow_atime_binned_df = dow_atime_df[['crs_arr_binned', 'dayOfWeek_binned', 'DEP_DEL30']].groupby(['crs_arr_binned', 'dayOfWeek_binned'], as_index = False).count()
+
+
+# COMMAND ----------
+
+trace1 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Monday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Monday'
+    
+)
+trace2 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Tuesday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Tuesday'
+)
+
+trace3 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Wednesday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Wednesday'
+    
+)
+trace4 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Thursday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Thursday'
+)
+
+trace5 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Friday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Friday'
+    
+)
+
+trace6 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Saturday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Saturday'
+)
+
+trace7 = go.Bar(
+    x=['12am-2am', '2am-4am', '4am-6am', '6am-8am', '8am-10am', '10am-12pm', '12pm-2pm', '2pm-4pm', '4pm-6pm', '6pm-8pm', '8pm-10pm', '10pm-12am'],
+    y= dow_atime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Sunday'].groupby('crs_arr_binned').sum()['DEP_DEL30'].tolist(),
+    name='Sunday'
+)
+
+data = [trace1, trace2, trace3, trace4, trace5, trace6, trace7]
+layout = go.Layout(
+    barmode='group', 
+    title="Day_Of_Week interacted with binned CRS_Arr_Time & Dep_Del30",
+    xaxis=dict(title="Binned CRS Arrival Time", type='category'),
+    yaxis=dict(title="Number of Delays")
+)
+
+fig = go.Figure(data=data, layout=layout)
+py.iplot(fig)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Day_Of_Week interacted with binned CRS_Elapsed_Time & Dep_Del30
+
+# COMMAND ----------
+
+dow_elapTime_df = full_data_dep[['DAY_OF_WEEK', 'CRS_ELAPSED_TIME', 'DEP_DEL30']].toPandas()
+
+dow_elapTime_df['crs_elap_binned'] = pd.cut(x = dow_elapTime_df['CRS_ELAPSED_TIME'], bins = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720], labels = ['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'])
+
+dow_elapTime_df['dayOfWeek_binned'] = pd.cut(x = dow_elapTime_df['DAY_OF_WEEK'], bins = [0, 1, 2, 3, 4, 5 , 6, 7], labels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+
+dow_elapTime_binned_df = dow_elapTime_df[['crs_elap_binned', 'dayOfWeek_binned', 'DEP_DEL30']].groupby(['crs_elap_binned', 'dayOfWeek_binned'], as_index = False).count()
+
+# COMMAND ----------
+
+trace1 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Monday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Monday'
+    
+)
+trace2 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Tuesday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Tuesday'
+)
+
+trace3 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Wednesday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Wednesday'
+    
+)
+trace4 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Thursday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Thursday'
+)
+
+trace5 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Friday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Friday'
+    
+)
+
+trace6 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Saturday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Saturday'
+)
+
+trace7 = go.Bar(
+    x=['1 hour', '2 hours', '3 hours', '4 hours', '5 hours', '6 hours', '7 hours', '8 hours', '9 hours', '10 hours', '11 hours', '12 hours'],
+    y= dow_elapTime_binned_df[dow_dtime_binned_df['dayOfWeek_binned']=='Sunday'].groupby('crs_elap_binned').sum()['DEP_DEL30'].tolist(),
+    name='Sunday'
+)
+
+data = [trace1, trace2, trace3, trace4, trace5, trace6, trace7]
+layout = go.Layout(
+    barmode='group', 
+    title="Day_Of_Week interacted with binned CRS_Elapsed_Time & Dep_Del30",
+    xaxis=dict(title="Binned CRS Elapsed Time", type='category'),
+    yaxis=dict(title="Number of Delays")
+)
+
+fig = go.Figure(data=data, layout=layout)
+py.iplot(fig)
