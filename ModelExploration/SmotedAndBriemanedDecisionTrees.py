@@ -42,6 +42,23 @@ airlines = airlines.select([outcomeName] + numFeatureNames + catFeatureNames + j
 
 # COMMAND ----------
 
+def PascalCaseData(df):
+  df = df.withColumnRenamed("DEP_DEL30", "Dep_Del30") \
+                           .withColumnRenamed("YEAR", "Year") \
+                           .withColumnRenamed("MONTH", "Month").withColumnRenamed("DAY_OF_MONTH", "Day_Of_Month") \
+                           .withColumnRenamed("DAY_OF_WEEK", "Day_Of_Week") \
+                           .withColumnRenamed("CRS_DEP_TIME", "CRS_Dep_Time").withColumnRenamed("CRS_ARR_TIME", "CRS_Arr_Time") \
+                           .withColumnRenamed("CRS_ELAPSED_TIME", "CRS_Elapsed_Time") \
+                           .withColumnRenamed("DISTANCE", "Distance") \
+                           .withColumnRenamed("DISTANCE_GROUP", "Distance_Group") \
+                           .withColumnRenamed("OP_UNIQUE_CARRIER", "Op_Unique_Carrier") \
+                           .withColumnRenamed("ORIGIN", "Origin").withColumnRenamed("DEST", "Dest")
+  return df
+
+airlines = PascalCaseData(airlines)
+
+# COMMAND ----------
+
 def SplitDataset(airlines):
   # Split airlines data into train, dev, test
   test = airlines.where('Year = 2019') # held out
@@ -58,6 +75,10 @@ def SplitDataset(airlines):
   return (mini_train, train, val, test) 
 
 mini_train, train, val, test = SplitDataset(airlines)
+
+# COMMAND ----------
+
+display(airlines.take(10))
 
 # COMMAND ----------
 
@@ -142,33 +163,41 @@ def PrintDecisionTreeModel(model, featureNames):
 
 # COMMAND ----------
 
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
 
 # Evaluates model predictions for the provided predictions
 # Predictions must have two columns: prediction & label
-def EvaluateModelPredictions(predictions, dataName=None, outcomeName='label'):   
-  print("\nModel Evaluation - ", dataName)
-  print("------------------------------------------")
+def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
+    print("Model Evaluation - " + dataName)
+    print("-----------------------------")
+    
+    evaluation_df = (predict_df \
+                     .withColumn('metric', F.concat(F.col(outcomeName), F.lit('-'), F.col("prediction"))).groupBy("metric") \
+                     .count() \
+                     .toPandas() \
+                     .assign(label = lambda df: df.metric.map({'1-1.0': 'TP', '1-0.0': 'FN', '0-0.0': 'TN', '0-1.0' : 'FP'})))
+    metric = evaluation_df.set_index("label").to_dict()['count']
 
-  # Accuracy
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="accuracy")
-  accuracy = evaluator.evaluate(predictions)
-  print("Accuracy:\t", accuracy)
+    # Default missing metrics to 0
+    for key in ['TP', 'TN', 'FP', 'FN']:
+      metric[key] = metric.get(key, 0)
+    
+	# Compute metrics
+    total = metric['TP'] + metric['FN'] + metric['TN'] + metric['FP']
+    accuracy = 0 if (total == 0) else (metric['TP'] + metric['TN'])/total
+    precision = 0 if ((metric['TP'] + metric['FP']) == 0) else metric['TP'] /(metric['TP'] + metric['FP'])
+    recall = 0 if ((metric['TP'] + metric['FN']) == 0) else metric['TP'] /(metric['TP'] + metric['FN'])
+    fscore = 0 if (precision+recall) == 0 else 2 * precision * recall /(precision+recall)
+    
+    # Compute Area under ROC
+    evaluator = BinaryClassificationEvaluator(rawPredictionCol="prediction", labelCol=outcomeName)
+    areaUnderROC = evaluator.evaluate(predict_df)
 
-  # Recall
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedRecall")
-  recall = evaluator.evaluate(predictions)
-  print("Recall:\t\t", recall)
-
-  # Precision
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction", metricName="weightedPrecision")
-  precision = evaluator.evaluate(predictions)
-  print("Precision:\t", precision)
-
-  # F1
-  evaluator = MulticlassClassificationEvaluator(labelCol=outcomeName, predictionCol="prediction",metricName="f1")
-  f1 = evaluator.evaluate(predictions)
-  print("F1:\t\t", f1)
+    print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}".format(
+        round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7)))
+    print("\nConfusion matrix :")
+    print(evaluation_df.drop("metric", axis =1))
+    print("\n")
   
 def PredictAndEvaluate(model, data, dataName, outcomeName):
   predictions = model.transform(data)
@@ -183,10 +212,21 @@ def PredictAndEvaluate(model, data, dataName, outcomeName):
 
 dataName = 'smoted_train_data'
 train_smoted =  spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+train_smoted = PascalCaseData(train_smoted)
 
 # COMMAND ----------
 
 display(train_smoted.take(10))
+
+# COMMAND ----------
+
+dataName = 'smoted_train_kmeans'
+train_smoted2 =  spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+train_smoted2 = PascalCaseData(train_smoted2)
+
+# COMMAND ----------
+
+display(train_smoted2.take(10))
 
 # COMMAND ----------
 
@@ -195,6 +235,10 @@ display(train.groupBy(outcomeName).count())
 # COMMAND ----------
 
 display(train_smoted.groupBy(outcomeName).count())
+
+# COMMAND ----------
+
+display(train_smoted2.groupBy(outcomeName).count())
 
 # COMMAND ----------
 
@@ -213,14 +257,12 @@ PrintDecisionTreeModel(model_nosmote.stages[-1], numFeatureNames + catFeatureNam
 
 # COMMAND ----------
 
+outcomeName
+
+# COMMAND ----------
+
 PredictAndEvaluate(model_nosmote, train, "train", outcomeName)
-
-# COMMAND ----------
-
 PredictAndEvaluate(model_nosmote, val, "val", outcomeName)
-
-# COMMAND ----------
-
 PredictAndEvaluate(model_nosmote, test, "test", outcomeName)
 
 # COMMAND ----------
@@ -230,28 +272,32 @@ PredictAndEvaluate(model_nosmote, test, "test", outcomeName)
 
 # COMMAND ----------
 
-train_smoted = train_smoted.withColumnRenamed("DEP_DEL30", "Dep_Del30") \
-                           .withColumnRenamed("YEAR", "Year") \
-                           .withColumnRenamed("MONTH", "Month").withColumnRenamed("DAY_OF_MONTH", "Day_Of_Month") \
-                           .withColumnRenamed("DAY_OF_WEEK", "Day_Of_Week") \
-                           .withColumnRenamed("CRS_DEP_TIME", "CRS_Dep_Time").withColumnRenamed("CRS_ARR_TIME", "CRS_Arr_Time") \
-                           .withColumnRenamed("CRS_ELAPSED_TIME", "CRS_Elapsed_Time") \
-                           .withColumnRenamed("DISTANCE", "Distance") \
-                           .withColumnRenamed("DISTANCE_GROUP", "Distance_Group") \
-                           .withColumnRenamed("OP_UNIQUE_CARRIER", "Op_Unique_Carrier") \
-                           .withColumnRenamed("ORIGIN", "Origin").withColumnRenamed("DEST", "Dest")
-
-# COMMAND ----------
-
 model_smote = TrainDecisionTreeModel(train_smoted, si_base + [va_base], outcomeName, maxDepth=8, maxBins=6647)
 PrintDecisionTreeModel(model_smote.stages[-1], numFeatureNames + catFeatureNames)
 
 # COMMAND ----------
 
-PredictAndEvaluate(model_smote, train_moted, "train_smoted", outcomeName)
+PredictAndEvaluate(model_smote, train_smoted, "train_smoted", outcomeName)
 PredictAndEvaluate(model_smote, train, "train", outcomeName)
 PredictAndEvaluate(model_smote, val, "val", outcomeName)
 PredictAndEvaluate(model_smote, test, "test", outcomeName)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Train the model (smote with kmeans)
+
+# COMMAND ----------
+
+model_smote2 = TrainDecisionTreeModel(train_smoted2, si_base + [va_base], outcomeName, maxDepth=8, maxBins=6647)
+PrintDecisionTreeModel(model_smote2.stages[-1], numFeatureNames + catFeatureNames)
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_smote2, train_smoted2, "train_smoted2", outcomeName)
+PredictAndEvaluate(model_smote2, train, "train", outcomeName)
+PredictAndEvaluate(model_smote2, val, "val", outcomeName)
+PredictAndEvaluate(model_smote2, test, "test", outcomeName)
 
 # COMMAND ----------
 
@@ -298,14 +344,17 @@ def ApplyBriemansMethod(df, briemanRanks, catFeatureName, outcomeName):
 
 # no smote data
 briemanRanksDict = {}
+train_brieman = train
+val_brieman = val
+test_brieman = test
 for catFeatureName in catFeatureNames:
   # Get ranks for feature
   briemanRanksDict[catFeatureName] = GenerateBriemanRanks(train, catFeatureName, outcomeName)
   
   # Apply Brieman method & do feature transformation
-  train_brieman = ApplyBriemansMethod(train, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
-  val_brieman = ApplyBriemansMethod(val, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
-  test_brieman = ApplyBriemansMethod(test, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  train_brieman = ApplyBriemansMethod(train_brieman, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  val_brieman = ApplyBriemansMethod(val_brieman, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  test_brieman = ApplyBriemansMethod(test_brieman, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
   
 briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
 
@@ -321,9 +370,9 @@ PrintDecisionTreeModel(model_nosmote_brieman.stages[-1], numFeatureNames + briFe
 
 # COMMAND ----------
 
-PredictAndEvaluate(model_nosmote_brieman, train_brieman, "train_brieman", outcomeName)
-PredictAndEvaluate(model_nosmote_brieman, val_brieman, "val_brieman", outcomeName)
-PredictAndEvaluate(model_nosmote_brieman, test_brieman, "test_brieman", outcomeName)
+PredictAndEvaluate(model_nosmote_brieman, train_brieman, "train", outcomeName)
+PredictAndEvaluate(model_nosmote_brieman, val_brieman, "val", outcomeName)
+PredictAndEvaluate(model_nosmote_brieman, test_brieman, "test", outcomeName)
 
 # COMMAND ----------
 
@@ -334,29 +383,71 @@ PredictAndEvaluate(model_nosmote_brieman, test_brieman, "test_brieman", outcomeN
 
 # smote data
 briemanRanksDict = {}
+train_smoted_brieman_smoted = train_smoted
+train_orig_brieman_smoted = train
+val_orig_brieman_smoted = val
+test_orig_brieman_smoted = test
 for catFeatureName in catFeatureNames:
   # Get ranks for feature
   briemanRanksDict[catFeatureName] = GenerateBriemanRanks(train_smoted, catFeatureName, outcomeName)
   
   # Apply Brieman method & do feature transformation
-  train_smoted_brieman = ApplyBriemansMethod(train_smoted, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
-  train_orig_brieman = ApplyBriemansMethod(train, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
-  val_smoted_brieman = ApplyBriemansMethod(val, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
-  test_smoted_brieman = ApplyBriemansMethod(test, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  train_smoted_brieman_smoted = ApplyBriemansMethod(train_smoted_brieman_smoted, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  train_orig_brieman_smoted = ApplyBriemansMethod(train_orig_brieman_smoted, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  val_orig_brieman_smoted = ApplyBriemansMethod(val_orig_brieman_smoted, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
+  test_orig_brieman_smoted = ApplyBriemansMethod(test_orig_brieman_smoted, briemanRanksDict[catFeatureName], catFeatureName, outcomeName)
   
 briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
 
 # COMMAND ----------
 
-model_smote_brieman = TrainDecisionTreeModel(train_smoted_brieman, si_brieman + [va_brieman], outcomeName, maxDepth=8, maxBins=6647)
+model_smote_brieman = TrainDecisionTreeModel(train_smoted_brieman_smoted, si_brieman + [va_brieman], outcomeName, maxDepth=8, maxBins=6647)
 PrintDecisionTreeModel(model_smote_brieman.stages[-1], numFeatureNames + briFeatureNames)
 
 # COMMAND ----------
 
-PredictAndEvaluate(model_smote_brieman, train_smoted_brieman, "train_smoted_brieman", outcomeName)
-PredictAndEvaluate(model_smote_brieman, train_orig_brieman, "train_orig_brieman", outcomeName)
-PredictAndEvaluate(model_smote_brieman, val_smoted_brieman, "val_smoted_brieman", outcomeName)
-PredictAndEvaluate(model_smote_brieman, test_smoted_brieman, "test_smoted_brieman", outcomeName)
+print("Evaluating on data briemaned with smoted data v1:")
+PredictAndEvaluate(model_smote_brieman, train_smoted_brieman_smoted, "train_smoted", outcomeName)
+PredictAndEvaluate(model_smote_brieman, train_orig_brieman_smoted, "train", outcomeName)
+PredictAndEvaluate(model_smote_brieman, val_orig_brieman_smoted, "val", outcomeName)
+PredictAndEvaluate(model_smote_brieman, test_orig_brieman_smoted, "test", outcomeName)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Apply Brieman to smoted 2 & train
+
+# COMMAND ----------
+
+# smote data
+briemanRanksDict2 = {}
+train_smoted2_brieman_smoted2 = train_smoted2
+train_orig_brieman_smoted2 = train
+val_orig_brieman_smoted2 = val
+test_orig_brieman_smoted2 = test
+for catFeatureName in catFeatureNames:
+  # Get ranks for feature
+  briemanRanksDict2[catFeatureName] = GenerateBriemanRanks(train_smoted2, catFeatureName, outcomeName)
+  
+  # Apply Brieman method & do feature transformation
+  train_smoted2_brieman_smoted2 = ApplyBriemansMethod(train_smoted2_brieman_smoted2, briemanRanksDict2[catFeatureName], catFeatureName, outcomeName)
+  train_orig_brieman_smoted2 = ApplyBriemansMethod(train_orig_brieman_smoted2, briemanRanksDict2[catFeatureName], catFeatureName, outcomeName)
+  val_orig_brieman_smoted2 = ApplyBriemansMethod(val_orig_brieman_smoted2, briemanRanksDict2[catFeatureName], catFeatureName, outcomeName)
+  test_orig_brieman_smoted2 = ApplyBriemansMethod(test_orig_brieman_smoted2, briemanRanksDict2[catFeatureName], catFeatureName, outcomeName)
+  
+briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict2]
+
+# COMMAND ----------
+
+model_smote2_brieman = TrainDecisionTreeModel(train_smoted2_brieman_smoted2, si_brieman + [va_brieman], outcomeName, maxDepth=8, maxBins=6647)
+PrintDecisionTreeModel(model_smote2_brieman.stages[-1], numFeatureNames + briFeatureNames)
+
+# COMMAND ----------
+
+PredictAndEvaluate(model_smote2_brieman, train_smoted2_brieman_smoted2, "train_smoted2", outcomeName)
+PredictAndEvaluate(model_smote2_brieman, train_orig_brieman_smoted2, "train", outcomeName)
+PredictAndEvaluate(model_smote2_brieman, val_orig_brieman_smoted2, "val", outcomeName)
+PredictAndEvaluate(model_smote2_brieman, test_orig_brieman_smoted2, "test", outcomeName)
 
 # COMMAND ----------
 
