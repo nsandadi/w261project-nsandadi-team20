@@ -720,6 +720,39 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ##### SMOTe (Synthetic Minority Over-sampling Technique) 
+# MAGIC 
+# MAGIC A dataset is imbalanced if the classes are not approximately equally represented. Training a machine learning model with an imbalanced dataset causes the model to develop a certain bias towards the majority class. To tackle the issue of class imbalance, Synthetic Minority Over-sampling Technique (SMOTe) was introduced by Chawla et al. in 2002.(Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357).
+# MAGIC 
+# MAGIC Under-sampling of the majority class or/and over-sampling of the minority class have been proposed as a good means of increasing the sensitivity of a classifier to the minority class. However, under-sampling the majority class samples could potentially lead to loss of important information. Also, over-sampling the minority class could lead to overfitting. The reason is fairly straightforward. Consider the effect on the decision regions in feature space when minority over-sampling is done by replication (sampling with replacement). With replication, the decision region that results in a classification decision for the minority class can actually become smaller and more specific as the minority samples in the region are replicated. This is the opposite of the desired effect. 
+# MAGIC 
+# MAGIC SMOTE provides a new approach to over-sampling. It is an over-sampling approach in which the minority class is over-sampled by creating “synthetic” examples rather than by over-sampling with replacement. This approach is inspired by a technique that proved successful in handwritten character recognition (Ha & Bunke, 1997). They created extra training data by performing certain operations on real data. In their case, operations like rotation and skew were natural ways to perturb the training data. SMOTe generates synthetic examples in a less application-specific manner, by operating in “feature space” rather than “data space”. The minority class is over-sampled by taking each minority class sample and introducing synthetic examples along the line segments joining the k nearest neighbors. Our implementation currently uses seven nearest neighbors.
+# MAGIC 
+# MAGIC Synthetic samples are generated in the following way: 
+# MAGIC - Take the difference between the feature vector (of the sample) under consideration and the feature vector of its nearest neighbor. 
+# MAGIC - Multiply this difference by a random number between 0 and 1.
+# MAGIC - Add it to the feature vector under consideration. 
+# MAGIC 
+# MAGIC This causes the selection of a random point along the line segment between two specific features. This approach effectively forces the decision region of the minority class to become more general. The synthetic examples cause the classifier to create larger and less specific decision regions (that contain nearby minority class points), rather than smaller and more specific regions. More general regions are now learned for the minority class samples rather than those being subsumed by the majority class samples around them. SMOTE provides more related minority class samples to learn from, thus allowing a learner to carve broader decision regions, leading to more coverage of the minority class. The effect is that decision trees generalize better.
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The original paper shows that a combination of our method of over-sampling the minority (abnormal) class and under-sampling the majority (normal) class can achieve better classifier performance (in ROC space) than only under-sampling the majority class. However, in this project we only created "synthetic data" without under-sampling the majority class as under-sampling could cause potential loss of information useful for prediction.
+# MAGIC 
+# MAGIC The number of minority class samples from our training set were approximately two million. However, running k nearest neighbors on each of these ~2M samples is not scalable as KNN needs to store the list of ~2M feature vectors in memory. We considered two approaches to address this challenge.
+# MAGIC 1. Find KNN of each minority sample (feature vector) from a random sample of all the minority sample (feature vectors) since the list of feature vectors needs to fit in memory.
+# MAGIC 2. Create clusters of minority sample data using K-means algorithm and then running KNN on each cluster in parallel. This approach uses the entire training data.
+# MAGIC 
+# MAGIC Out of the two approaches, we found the second approach took less time to run and produced better results when this data was used to train a decision tree.
+
+# COMMAND ----------
+
 # DBTITLE 1,Preparing SMOTEd data (TODO: remove?)
 # Apply Feature Engineering described above to smoted training data
 # Provided Breiman ranks dict should be based on unsmoted training data
@@ -805,6 +838,10 @@ briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman'
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## IV. Algorithm Exploration
 # MAGIC - Apply 2-3 Algorithms
@@ -824,21 +861,40 @@ briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman'
 
 # COMMAND ----------
 
-# - Numerical Features: 		 ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
-# - Categorical Features: 	 ['Op_Unique_Carrier', 'Origin', 'Dest']
+# MAGIC %md
+# MAGIC For the algorithm exploration the important considerations were as follows:       
+# MAGIC - Algorithm must scale 
+# MAGIC - it must be suitable for classification
+# MAGIC - it must handle continuous and categorical variables
+# MAGIC - model must be interpretable / explainable
+# MAGIC 
+# MAGIC We performed minimal EDA and feature engineering for this exploration. The outcome variable Dep_Del30 marked the flight as "delayed" if the departure delay was 30 minutes or more. Given this dataset roughly had 10% of the true positives, it was a very imbalanced dataset. This means by taking a baseline model which simply assumes the outcome as 'no delay' it achieved an accuracy of ~90%. But practically this would be a useless model as it fails to identify any true positives. Instead we need to consider a model that will improve the repdiction of more true positives/ reduce false negatives.  
+# MAGIC 
+# MAGIC Based on the modeling results we observed the following:     
+# MAGIC - Both logistic regression and SVM had high accuracy but failed to predict any of the true positives. Both of these models also failed to predict any false positives. Based on this we concluded both the models were predicting "no delay" all the time.
+# MAGIC - Naive Bayes identified the most number of true positives, but it also had roughly 5 times as many false positives. It had an accuracy slightly better than a coin toss.
+# MAGIC - Decision tree identified some true positives, it identified a similar set of false positives. It also demonstrated good accuracy and precision. Its recall rate wasn't very high. Overall emperically, this model looked much more balanced fit for our further analysis.
+# MAGIC 
+# MAGIC Theoretically logistic regression is very easy to model, interpret and train. The main limitation of logistic regression is the **multi-collinearity** among the features. Logisitc regression is also susceptible to overfitting due to imbalanced data. Support verctor machines on the other hand is not suitable for large datasets. As these algorithms use hyperplanes it is much harder to interpret them. Larger data sets take a long time to process in relation to other models. With Naive Bayes, they are easy to process and scale really well. Like logistic regression it makes an assumption that features are independent of each other which is not true in many cases.
+# MAGIC 
+# MAGIC Decision trees also seemed theoretically promising. Compared to other algorithms desicion trees require less data preparation during pre-processing. It also doesn't require normalization or scaling and can handle null values gracefully. It is also easily interpretable. They require higher time to train the model. But based on the keypoints discussed able we picked the decision tree as our algorithm to move forward.
 
-#subset the dataset to the features in numFeatureNames & catFeatureNames
-mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + catFeatureNames)
-train_algo = train.select([outcomeName] + numFeatureNames + catFeatureNames)
-val_algo = val.select([outcomeName] + numFeatureNames + catFeatureNames)
+# COMMAND ----------
+
+
+#subset the dataset to the features in numFeatureNames, contNumFeatureNames  & catFeatureNames
+mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+train_algo = train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+val_algo = val.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
 
 # Define outcome & features to use in model development
 # numFeatureNames are continuous features
 # catFeatureNames are categorical features
-outcomeName = 'Dep_Del30'
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
-catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest'] 
 
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 
 # COMMAND ----------
 
@@ -869,8 +925,8 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
       
     elif algorithm == 'nb':
       # set the CRS_Elapsed_Time to 0 if its negative
-      df = df.withColumn("CRS_Elapsed_Time", \
-              when(df["CRS_Elapsed_Time"] < 0, 0.0).otherwise(df["CRS_Elapsed_Time"]))
+      df = df.withColumn('CRS_Elapsed_Time', when(df['CRS_Elapsed_Time'] < 0, 0.0).otherwise(df['CRS_Elapsed_Time']))
+
       nb = NaiveBayes(labelCol = outcomeName, featuresCol = "features", smoothing = 1)
       pipeline = Pipeline(stages=indexers + [assembler,nb])
       
@@ -884,14 +940,6 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
     tr_model=pipeline.fit(df)
 
     return tr_model
-
-# COMMAND ----------
-
-# this function run the prediction in the model
-# And calculate prediction metrics like accuracy, recall, precision ...etc
-def PredictAndEvaluate(model, data, dataName, outcomeName, algorithm):
-  predictions = model.transform(data)
-  EvaluateModelPredictions(predictions, dataName, outcomeName, algorithm)
 
 # COMMAND ----------
 
@@ -946,14 +994,15 @@ def PredictAndEvaluate(model, data, dataName, outcomeName):
 dataName = 'val'
 algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
+  newnumFeatureNames = numFeatureNames + contNumFeatureNames
+  titleName = dataName+ ' with ' + algorithm
   if algorithm == 'svm':
-    titleName = dataName+ ' with ' + algorithm
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=True)
-    PredictAndEvaluate(tr_model, val_algo, dataName, outcomeName)
-  else:
-    titleName = dataName+ ' with ' + algorithm
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,numFeatureNames,outcomeName,svmflag=False)
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=True)
     PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
+  else:
+    tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=False)
+    PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
+
 
 # COMMAND ----------
 
@@ -1223,30 +1272,34 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 # MAGIC %md
 # MAGIC #### Transform data for Ensemble
 # MAGIC 
-# MAGIC First, the airline data is transformed and feature indexer is calculated.  Do assembler transformation before train test split for `VectorIndexer` to work 
+# MAGIC `mini_train`, `train`, `val` and `test` is transformed using VectorAssmebler into a feature vector - label format. The feature indexer is also calculated. 
 
 # COMMAND ----------
 
-def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data) :
+def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
   target       = ["Dep_Del30"]
   all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
   
   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
   ensemble_pipeline = Pipeline(stages=[assembler])
 
-  tmp_mini_train, tmp_train, tmp_val, tmp_test = (ensemble_pipeline.fit(mini_train_data).transform(mini_train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
+  tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted = (ensemble_pipeline.fit(mini_train_data).transform(mini_train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
                                                   ensemble_pipeline.fit(train_data).transform(train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
                                                   ensemble_pipeline.fit(val_data).transform(val_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
-                                                  ensemble_pipeline.fit(test_data).transform(test_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))
+                                                  ensemble_pipeline.fit(test_data).transform(test_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
+                                                  ensemble_pipeline.fit(train_smoted_data).transform(train_smoted_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))
   
   featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train
                                                                                                           .union(tmp_val)
                                                                                                           .union(tmp_test))
+  featureIndexer_smorted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train_smoted
+                                                                                                        .union(tmp_val)
+                                                                                                        .union(tmp_test))
   
-  return all_features, featureIndexer, tmp_mini_train, tmp_train, tmp_val, tmp_test
+  return all_features, featureIndexer, featureIndexer_smorted, tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted
 
 
-all_ensemble_features, ensamble_featureIndexer, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = TransformDataForEnsemble(mini_train, train, val, test)
+all_ensemble_features, ensemble_featureIndexer, ensemble_featureIndexer_smoted, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test, ensemble_train_smoted = TransformDataForEnsemble(mini_train, train, val, test, train_smoted)
 
 print(all_ensemble_features)
 ensemble_mini_train.show(2)
@@ -1255,6 +1308,8 @@ ensemble_mini_train.show(2)
 
 # MAGIC %md
 # MAGIC #### Balance the dataset, partition for further training
+# MAGIC 
+# MAGIC Balanced dataset is generated. We will generate a set of 10 datasets. 9 will be used for training the level one classifiers. The last one will be used to train the level two classfier. 
 
 # COMMAND ----------
 
@@ -1295,12 +1350,23 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC Check for data set balancing
+# MAGIC Check for data set balancing, note that number of majority and minority classes are close enough.
 
 # COMMAND ----------
 
-([[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group], 
+print([[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group], 
  train_combiner.groupBy('label').count().toPandas()["count"].to_list())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Check for data set balancing for smoted data
+
+# COMMAND ----------
+
+print(ensemble_train_smoted.groupBy('label').count().toPandas()["count"].to_list())
+smoted_splits = ensemble_train_smoted.randomSplit([1.0] * 10, 1)
+train_combiner_smoted, train_group_smoted = smoted_splits[-1], smoted_splits[0:-1]
 
 # COMMAND ----------
 
@@ -1335,6 +1401,8 @@ def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
       
   return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
 
+# The training is still done serially (code commented below) to avoid dabricks error.
+
 # Parallel training is not done in databricks environment.      
 # ensemble_model = TrainEnsembleModels_parallel(train_group, ensamble_featureIndexer, 
 #                     # Type of model we can use.
@@ -1353,6 +1421,7 @@ ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer,
                     # Type of model we can use.
                     #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
                     #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=6, numTrees=25, impurity='gini')
+                    # Works best
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
                    )
 
@@ -1406,6 +1475,8 @@ fig.show()
 
 # MAGIC %md 
 # MAGIC #### Construct a new data set based on the output of base classifiers
+# MAGIC 
+# MAGIC Do inference on first level classifiers. using the remaining balanced dataset. Collect the predictions. Use these predictions as features for level to voting model.
 
 # COMMAND ----------
 
@@ -1420,7 +1491,6 @@ def do_ensemble_prediction(em, train_en) :
                                 .select(F.col("prediction").alias("prediction_" + str(num)))
                                 .withColumn('ROW_ID', F.monotonically_increasing_id())
         )
-        #EvaluateModelPredictions(m, predictions, str(num))
     return prediction_array
 
 ensemble_prediction = do_ensemble_prediction(ensemble_model, train_combiner)
@@ -1433,7 +1503,7 @@ ensemble_prediction = do_ensemble_prediction(ensemble_model, train_combiner)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC The resulting array of dataframes is reduced into a single dataframe by iteratively joining over.
+# MAGIC Join together the individual dataframes to create the final training dataset for level two model.
 
 # COMMAND ----------
 
@@ -1468,6 +1538,8 @@ reduced_df.show(2)
 
 # MAGIC %md
 # MAGIC #### Learn a second-level classifier based on training set from first-level.
+# MAGIC 
+# MAGIC Train the second level classifier. Use Logistic regression, Support vector machines and random forest for training.
 
 # COMMAND ----------
 
@@ -1501,6 +1573,11 @@ model_trained_ensemble_rf = TrainCombiner(ensemble_transformed, ensemble_feature
 
 # MAGIC %md
 # MAGIC #### Create final ensemble pipeline
+# MAGIC 
+# MAGIC Stitch together the final pipeline. The pipelne accepts below arguments :
+# MAGIC * The level one model
+# MAGIC * Level two voting model
+# MAGIC * data for running inference.
 
 # COMMAND ----------
 
@@ -1571,15 +1648,76 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC #### Run the same steps with smorted data
+
+# COMMAND ----------
+
+# Train first-level classifiers using random forest.
+ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_featureIndexer_smoted, 
+                    RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
+                   )
+
+# Construct a new data set based on the output of base classifiers
+ensemble_prediction_smoted = do_ensemble_prediction(ensemble_model_smoted, train_combiner_smoted)
+
+# Assemble and transform data for second level training
+reduced_df_smoted = assemble_dataframe(ensemble_prediction_smoted)
+ensemble_transformed_smoted = do_transform_final(reduced_df_smoted)
+
+# Learn a second-level classifier based on training set from first-level.
+
+ensemble_featureIndexer_smoted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=3).fit(ensemble_transformed_smoted)
+
+# Logistic Regression
+model_trained_ensemble_lr_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
+
+# Linear SVM
+model_trained_ensemble_svm_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              LinearSVC(featuresCol="indexedFeatures", maxIter=10, regParam=0.1))
+
+# Random forest
+model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
+
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC #### Model evaluation
+# MAGIC 
+# MAGIC Run model evaluation with test set and validation set.
 
 # COMMAND ----------
 
 model_eval = []
-for (l2_name, l2_model)  in [("Logistic", model_trained_ensemble_lr), ("SVM", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
+for (l2_name, l2_model, l1_model)  in [
+  ("LR-smoted", model_trained_ensemble_lr_smoted, ensemble_model_smoted), 
+  ("SVM-smoted", model_trained_ensemble_svm_smoted, ensemble_model_smoted), 
+  ("RF-smoted", model_trained_ensemble_rf_smoted, ensemble_model_smoted),
+#   ("LR", model_trained_ensemble_lr, ensemble_model), 
+#   ("SVM", model_trained_ensemble_svm, ensemble_model), 
+#   ("RF", model_trained_ensemble_rf, ensemble_model)
+] :
   for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
-      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, ensemble_model, data)
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+      model_eval.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
+
+# COMMAND ----------
+
+for (l2_name, l2_model, l1_model)  in [
+#   ("LR-smoted", model_trained_ensemble_lr_smoted, ensemble_model_smoted), 
+#   ("SVM-smoted", model_trained_ensemble_svm_smoted, ensemble_model_smoted), 
+#   ("RF-smoted", model_trained_ensemble_rf_smoted, ensemble_model_smoted),
+  ("LR", model_trained_ensemble_lr, ensemble_model), 
+  ("SVM", model_trained_ensemble_svm, ensemble_model), 
+  ("RF", model_trained_ensemble_rf, ensemble_model),
+] :
+  for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
+      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
       eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
       model_eval.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
 
@@ -1617,7 +1755,7 @@ fig = go.Figure(data=[go.Table(
     font = dict(color = 'darkslategray', size = 13)
     ))
 ])
-fig.update_layout(width=1400, height=600)
+fig.update_layout(width=1400, height=600, title="Model evaluation results")
 fig.show()
 
 # COMMAND ----------
