@@ -24,7 +24,7 @@
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col
 from pyspark.sql.functions import when
-from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from pyspark.sql.functions import udf
 
 from pyspark.ml import Pipeline
@@ -211,9 +211,10 @@ def MakeRegBarChart(full_data_dep, outcomeName, var, orderBy, barmode, xtype, xr
   )
   fig = go.Figure(data=[t1, t2], layout=l)
   fig.show()
+  return fig
 
 var = 'CRS_Elapsed_Time'
-MakeRegBarChart(train_and_val, outcomeName, var, orderBy=var, barmode='stack', xtype='linear', xrange=[0, 450])
+fig = MakeRegBarChart(train_and_val, outcomeName, var, orderBy=var, barmode='stack', xtype='linear', xrange=[0, 450])
 
 # COMMAND ----------
 
@@ -247,7 +248,7 @@ def BinValuesForEDA(df, var, splits, labels):
 d = BinValuesForEDA(train_and_val, var, 
                     splits = [float("-inf"), 60, 120, 180, 240, 300, 360, float("inf")], 
                     labels = ['0-1 hours', '1-2 hours', '2-3 hours', '3-4 hours', '4-5 hours', '5-6 hours', '6+ hours'])
-MakeRegBarChart(d, outcomeName, var + "_binlabel", orderBy=var + "_binlabel", barmode='stack', xtype='category')
+fig = MakeRegBarChart(d, outcomeName, var + "_binlabel", orderBy=var + "_binlabel", barmode='stack', xtype='category')
 
 # COMMAND ----------
 
@@ -316,9 +317,10 @@ def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   )
   fig = go.Figure(data=[t1, t2], layout=l)
   fig.show()
+  return fig
   
 # Plot Carrier and outcome with bar plots of probability on x axis
-MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=5)
+fig = MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=5)
 
 # COMMAND ----------
 
@@ -348,85 +350,91 @@ display(train_and_val.groupBy(outcomeName).count())
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## III. Feature Engineering
-# MAGIC - Cleaning
-# MAGIC     - Remove cancelled/diverted flights (don't have full data)
-# MAGIC     - Remove flights with null outcomes (can't estimate)
-# MAGIC - Transformations
-# MAGIC     - Binning (elapsed time, departure/arrival time, )
-# MAGIC     - Forming Indiciator Variables (e.g. departure/arrival delay > 30 min (true/false))
-# MAGIC - Interaction Terms
-# MAGIC     - Interacting variables to make new features ("Day of Year", "Time of week")
-# MAGIC     - Binning interaction terms
-# MAGIC     - Joining interaction terms to make new features
-# MAGIC          - Day of month with month ("Day of Year") -> Holidays indiciator (or near holiday indicator)
-# MAGIC          - Departure/Arrival time day of week ("Time of week")
-# MAGIC - Treatment of Categorical Variables
-# MAGIC     - Categorical variables: Time of Year Variables, Distance Group, Carrier, origin/destination airports
-# MAGIC     - Order  Breiman's Theorem (rank by volume of flights, probability of departure delay, etc)
-# MAGIC     - Make broader categories for categorical variables (not something we've tried yet, but we can do this)
-# MAGIC     - one-hot encoding (svms)
-# MAGIC - Treatment for categorical / binned variables
-# MAGIC     - computing # of flights per category
-# MAGIC     - computing probability of delay per category
-# MAGIC     - Try a model that includes these to see if the model selects them (Decision tree)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC More visualizations from our in-depth EDA can be found in notebook here:
+# MAGIC ### Further EDA
+# MAGIC During the investigation of our dataset, we did a deep dive to examine all of our in-scope variables from the original dataset to understand the nature of the dataset and help inform our decision making. To see more plots and discussion, please refer to our more extensive EDA here: 
 # MAGIC 
 # MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/3895804345790408/command/3895804345790409
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Show columns of interest summarized with counts of null values & summary stats
-# MAGIC * Clearly explain & define each variable
-# MAGIC * Justify missing values & how will handle
-# MAGIC * Addres feature distributions
-
-# COMMAND ----------
-
-# Get number of distinct values for each column in full training dataset
-display(train_and_val.agg(*(F.countDistinct(F.col(c)).alias(c) for c in train_and_val.columns)))
-
-# COMMAND ----------
-
-# get summary stats for the full training dataset
-display(train_and_val.describe())
-
-# COMMAND ----------
-
-# get number of null values for each column (none!)
-display(train_and_val.select([F.count(F.when(F.isnan(c) | F.col(c).isNull(), c)).alias(c) for c in [outcomeName] + numFeatureNames + catFeatureNames]))
+# MAGIC ## III. Feature Engineering
+# MAGIC With the EDA discussion from the previous section in mind, we now proceed with applying the feature engineering described in the previous section. We will first look at summary statistics and check for missing values for each of our features for predicting departure delays. We'll then look to binning our numerical features, adding additional features via interactions, bringing in additional datasets, and looking at aggregated statistics. For the categorical features in the dataset (both original and those developed from an feature transformations), we will apply Breiman's Theorem to order these features and transform them into numerical features. Finally, we'll take a closer look at the data preprocessing techniques we will explore for balancing our dataset.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Cover the following
-# MAGIC * General EDA of vars
-# MAGIC * Binning
-# MAGIC * Interaction Terms
-# MAGIC * Ordering of Categorical Variables (Breiman's Theorem)
-# MAGIC * only do modifications to training split
-# MAGIC * save result to cluster
+# MAGIC ### Summary Statistics & Missing Values Assessment
+# MAGIC In the table shown below, we can see a set of summary statistics for each base feature, including general summary statistics (count, mean, standard deviation, min, max), as well as the number of distinct values and the number of null/missing values in the training & validation set. Based on the results shown below, all values appear to fall into the expected ranges based on the definitions of these features.
+
+# COMMAND ----------
+
+def GetStats(df):
+  allCols = [outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames
+
+  # Get summary stats for the full training dataset
+  summaryStats = df.select(allCols).describe().select(['summary'] + allCols)
+
+  # Get number of distinct values for each column in full training dataset
+  distinctCount = df.select(allCols) \
+                               .agg(*(F.countDistinct(F.col(c)).alias(c) for c in allCols)) \
+                               .withColumn('summary', F.lit('distinct count')) \
+                               .select(['summary'] + allCols)
+
+  # Get number of nulls for each column in full training dataset
+  nullCount = df.select([F.count(F.when(F.isnan(c) | F.col(c).isNull(), c)).alias(c) for c in allCols]) \
+                .withColumn('summary', F.lit('null count')) \
+                .select(['summary'] + allCols)
+
+  # Union all statistics to single display
+  res = summaryStats.union(distinctCount.union(nullCount))
+  display(res)
+  
+GetStats(train_and_val)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Bin Numerical Features (reducing potential splits)
+# MAGIC The only odd value seems to be the minimum value for `CRS_Elapsed_Time` that takes on a value of -99.0. Upon closer inspection, there's no true indication for why this datapoint is negative, except that it is likely a mistake in the dataset, since the difference in the departure and arrival times is 76 minutes. Given that this is just one data point and we have nearly 24 million data points, we will defer updating this as it should not have a huge impact on our training results.
+# MAGIC 
+# MAGIC Finally, note that we do not appear to have any null values in our training and validation data and thus we will not need to handle missing values for the purpose of training. However, there is a potential that our test data has missing values and or the features of the test data take on values that were not seen in the training data. Because this is always a possibility at inference time, we will need to make sure our data transformations are robust to such cases--we will evaluate this on a case-by-case basis.
 
 # COMMAND ----------
 
-from pyspark.ml.feature import Bucketizer
-from pyspark.sql.types import IntegerType
+# MAGIC %md
+# MAGIC ### Binning Continuous Numerical Features
+# MAGIC As discussed in task #1 of the EDA in section II, one of the transformations we'd like to apply to our continuous numerical features is a binning transformation. In doing so, we can reduce the continuous variables to meaningful increments that will help with interpretability in Logistic Regression and help to reduce the number of splits that needs to be considered by the Decision Tree algorithm. In order to determine reasonable split points, let's evaluate the distributions of each of the continuous variables `CRS_Dep_Time`, `CRS_Arr_Time`, and `CRS_Elapsed_Time` (note that the continuous feature `Distance` has already been binned via the variable `Distance_Group`, so we will not examine this feature). These distribution are shown below:
+
+# COMMAND ----------
+
+fig1 = MakeRegBarChart(train_and_val, outcomeName, 'CRS_Dep_Time', orderBy='CRS_Dep_Time', barmode='stack', xtype='linear')
+
+# COMMAND ----------
+
+fig2 = MakeRegBarChart(train_and_val, outcomeName, 'CRS_Arr_Time', orderBy='CRS_Arr_Time', barmode='stack', xtype='linear')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC From the distributions of values for `CRS_Dep_Time` and `CRS_Arr_Time`, we can see clusters of flights defined by --00 to --59 blocks (these clusters are a remnant of the structure of the 2400-clock, since there are no valid times from --60 to --99). With that said, by analyzing any one of these clusters, it's clear that most flights are scheduled at 5-minute markers (such as 1200, 1205, 1210, etc). Since there really isn't a big difference between times separated by a couple of 5 minute intervals, we will choose to bin these values by 10-minute increments to ensure we still have enough data granularity to differentiate between populate times such as 1200 and 1230 but not too much granularity to have too many splits to consider (reducing to 10-minute granularity alone reduces the number of splits for a Decision Tree algorithm to consider from at most 1439 to just about 144 split points).
+
+# COMMAND ----------
+
+fig3 = MakeRegBarChart(train_and_val, outcomeName, 'CRS_Elapsed_Time', orderBy='CRS_Elapsed_Time', barmode='stack', xtype='linear')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC For the `CRS_Elapsed_Time`, as we saw in the EDA Task 1, we can still capture the general distribution of the scheduled flight duration even when we bin by 1 hour durations, which leaves us with meaningful groups and much fewer splits to consider. For this reason, we will bin `CRS_Elapsed_Time` to 1 hour increments. 
+# MAGIC 
+# MAGIC All three of the described binning transformations are applied with the code shown below and appended to our original *Airline Delays* dataset. Note that this binning operation is independently applied to each record in the original dataset, using the binning we decided based on the training dataset. Also note that by using the `Bucketizer` 'keep' flag, we explicitly choose to bin any invalid values into a special bucket, which will allow our models to be resiliant even in the event of encountering values that go beyond the limits defined. Note that for simplicity, we extend the `CRS_Elapsed_Time` bins to negative and positive infinity to ensure all values are binned properly. All new binned features will be suffixed with `_bin`, except for `Distance_Group`, which is already defined. A few examples of the new columns are shown below.
+
+# COMMAND ----------
 
 # Augments the provided dataset for the given feature/variable with a binned version
 # of that variable, as defined by splits parameter
 # Column name suffixed with '_bin' will be the binned column
-# Column name suffixed with '_binlabel' will be the nicely-named version of the binned column, using provided labels
-def BinFeature(df, featureName, splits, labels=None):
+def BinFeature(df, featureName, splits):
   if (featureName + "_bin" in df.columns):
     print("Variable '" + featureName + "_bin' already exists")
     return df
@@ -434,39 +442,41 @@ def BinFeature(df, featureName, splits, labels=None):
   # Generate binned column for feature
   bucketizer = Bucketizer(splits=splits, inputCol=featureName, outputCol=featureName + "_bin")
   df_bin = bucketizer.setHandleInvalid("keep").transform(df)
-  df_bin = df_bin.withColumn(featureName + "_bin", df_bin[featureName + "_bin"].cast(IntegerType()))
-  
-  if (labels is not None):
-    # Map bucket number to binned feature label
-    bucketMaps = {}
-    bucketNum = 0
-    for l in labels:
-      bucketMaps[bucketNum] = l
-      bucketNum = bucketNum + 1
-
-    # Generate new column with binned feature label (human-readable)
-    def newCols(x):
-      return bucketMaps[x]
-    callnewColsUdf = udf(newCols, StringType())
-    df_bin = df_bin.withColumn(featureName + "_binlabel", callnewColsUdf(F.col(featureName + "_bin")))
-    
+  df_bin = df_bin.withColumn(featureName + "_bin", df_bin[featureName + "_bin"].cast(IntegerType()))    
   return df_bin
 
 # Bin numerical features in entire airlines dataset
 # Note that splits are not based on test set but are applied to test set (as would be applied at inference time)
-# airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
-# airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 200)]) # 2-hour blocks
 airlines = BinFeature(airlines, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
 airlines = BinFeature(airlines, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
 airlines = BinFeature(airlines, 'CRS_Elapsed_Time', splits = [float("-inf")] + [i for i in range(0, 660 + 1, 60)] + [float("inf")]) # 1-hour blocks
 binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
 
-display(airlines.take(6))
+display(airlines.select(contNumFeatureNames + binFeatureNames + ['Distance_Group']).take(6))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Add Interaction Features
+# MAGIC ### Interacting Features
+# MAGIC During our in-depth EDA, we investigated a few interactions based on intuition. From our own experiences, certain temporal interaction terms and airport-related interactions would intuitively be indicative of a flight that is more likely to experience a departure delay.
+# MAGIC 
+# MAGIC Let's consider the features `Month` and `Day_Of_Month`. On their own, we may be able to capture aggregated information about flights delays on a particular day of the month or a particular month on its own. But if we interact the two, we get the concept of `Day_Of_Year`, and upon closer inspection, there do appear to be certain days of the year that experience more traffic and more delays. Take the stacked bar chart comparing the ratio of delayed and no-delay flights shown below for `Day_Of_Year`, which is the concatenation of `Month` and `Day_Of_Month`. From this chart, we can see that there is a higher probability of departure delays for dates in the summer, as well as near the end of December and beginning of January, but not on specific holidays. Because there does appear to be some relationship between `Day_Of_Year` and the likelihood of a departure delay, we choose to add this as one of our interaction terms.
+
+# COMMAND ----------
+
+# Plot that demonstrates the probability of a departure delay, given the day of year (interaction of month & day of month)
+var = "Day_Of_Year"
+d = train_and_val.select("Month", "Day_Of_Month", outcomeName) \
+                 .withColumn(var, F.concat(F.col('Month'), F.lit('-'), F.col('Day_Of_Month'))) \
+                 .groupBy(var, "Month", "Day_Of_Month", outcomeName).count() \
+                 .orderBy("Month", "Day_Of_Month") \
+                 .toPandas()
+display(d)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Another set of interaction terms that we considered was the departure/arrival "time of week". We know from EDA that there are some days of the week that experience more delays/traffic and others that experience less; same goes for the time of day. 
 
 # COMMAND ----------
 
@@ -661,6 +671,29 @@ briFeatureNames = [entry + "_brieman" for entry in breimanRanksDict]
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC #### III Feature Engineering Notes
+# MAGIC - Transformations
+# MAGIC     - Binning (elapsed time, departure/arrival time, )
+# MAGIC     - Forming Indiciator Variables (e.g. departure/arrival delay > 30 min (true/false))
+# MAGIC - Interaction Terms
+# MAGIC     - Interacting variables to make new features ("Day of Year", "Time of week")
+# MAGIC     - Binning interaction terms
+# MAGIC     - Joining interaction terms to make new features
+# MAGIC          - Day of month with month ("Day of Year") -> Holidays indiciator (or near holiday indicator)
+# MAGIC          - Departure/Arrival time day of week ("Time of week")
+# MAGIC - Treatment of Categorical Variables
+# MAGIC     - Categorical variables: Time of Year Variables, Distance Group, Carrier, origin/destination airports
+# MAGIC     - Order  Breiman's Theorem (rank by volume of flights, probability of departure delay, etc)
+# MAGIC     - Make broader categories for categorical variables (not something we've tried yet, but we can do this)
+# MAGIC     - one-hot encoding (svms)
+# MAGIC - Treatment for categorical / binned variables
+# MAGIC     - computing # of flights per category
+# MAGIC     - computing probability of delay per category
+# MAGIC     - Try a model that includes these to see if the model selects them (Decision tree)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Write and Reference augmented airlines
 
@@ -687,17 +720,73 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 
 # COMMAND ----------
 
-# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
+# DBTITLE 1,Preparing SMOTEd data (TODO: remove?)
+# Apply Feature Engineering described above to smoted training data
+# Provided Breiman ranks dict should be based on unsmoted training data
+def ApplyFeatureEngineeringToSmotedTrainingData(df, breimanRanksDict):
+  # Select features to ensure features use pascal casing
+  outcomeName = 'Dep_Del30'
+  numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+  contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
+  catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+  df = df.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+  
+  
+  # Bin Continuous Features
+  df = BinFeature(df, 'CRS_Dep_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
+  df = BinFeature(df, 'CRS_Arr_Time', splits = [i for i in range(0, 2400 + 1, 10)]) # 10 min blocks
+  df = BinFeature(df, 'CRS_Elapsed_Time', splits = [float("-inf")] + [i for i in range(0, 660 + 1, 60)] + [float("inf")]) # 1-hour blocks
+
+  # Add Interaction Features
+  interactions = [('Month', 'Day_Of_Month', 'Day_Of_Year'), 
+                  ('Origin', 'Dest', 'Origin_Dest'),
+                  ('Day_Of_Week', 'CRS_Dep_Time_bin', 'Dep_Time_Of_Week'),
+                  ('Day_Of_Week', 'CRS_Arr_Time_bin', 'Arr_Time_Of_Week')]
+  df = AddInteractions(df, interactions)
+  intFeatureNames = [i[2] for i in interactions]
+
+  # Add FL_Date column (for holiday feature generation)
+  df = df.withColumn('FL_Date', F.concat_ws("-", F.col("Year"), F.col("Month"), F.col("Day_Of_Month")).cast(DateType()))
+  
+  # Add Holiday Feature
+  df = AddHolidayFeature(df)
+  holFeatureNames = ['Holiday']
+
+  # Add Origin Activity Feature
+  df = AddOriginActivityFeature(df)
+
+  # Apply Breiman Ranking
+  featuresToApplyBreimanRanks = catFeatureNames + intFeatureNames + holFeatureNames
+  for feature in featuresToApplyBreimanRanks:
+    # Apply Breiman's method & do feature transformation for all datasets
+    df = ApplyBreimansMethod(df, breimanRanksDict[feature], feature, outcomeName)
+    
+  return df
+
 # Read prepared data from parquet for training
-def ReadDataFromParquet(data, dataName):
+def ReadDataFromParquet(dataName):
   # Read data back directly from disk 
   return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
 
-airlines = ReadDataFromParquet(airlines, 'augmented')
-mini_train = ReadDataFromParquet(mini_train, 'augmented_mini_train')
-train = ReadDataFromParquet(train, 'augmented_train')
-val = ReadDataFromParquet(val, 'augmented_val')
-test = ReadDataFromParquet(test, 'augmented_test')
+# Prep Smoted training data
+train_smoted = ReadDataFromParquet('smoted_train_kmeans')
+train_smoted = ApplyFeatureEngineeringToSmotedTrainingData(train_smoted, breimanRanksDict)
+train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_kmeans')
+
+# COMMAND ----------
+
+# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
+# Read prepared data from parquet for training
+def ReadDataFromParquet(dataName):
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
+airlines = ReadDataFromParquet('augmented')
+mini_train = ReadDataFromParquet('augmented_mini_train')
+train = ReadDataFromParquet('augmented_train')
+val = ReadDataFromParquet('augmented_val')
+test = ReadDataFromParquet('augmented_test')
+train_smoted = ReadDataFromParquet('augmented_smoted_train_kmeans')
 
 ###########################################
 # Define all variables for easy reference #
@@ -1138,30 +1227,6 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 
 # COMMAND ----------
 
-# def TransformDataForEnsemble(full_dataset):
-
-#   # Convert strings to index
-#   str_indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in ["Op_Unique_Carrier",	"Origin", "Dest", "Holiday"]]
-#   target       = ["Dep_Del30"]
-#   all_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin', "Op_Unique_Carrier_index", "Origin_index", "Dest_index", "Holiday_index", "Origin_Activity"]
-  
-#   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
-#   ensemble_pipeline = Pipeline(stages=str_indexers + [assembler])
-  
-#   transformed_data =  (ensemble_pipeline
-#           .fit(full_dataset)
-#           .transform(full_dataset)
-#           .select(["Year", "features"] + target)
-#           .withColumnRenamed("Dep_Del30", "label"))
-  
-#   # Here, create automatic Categories. All variables > 400 Categories will be treated as Continuous.
-#   # else will be treated as Categories by random forest.
-#   featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(transformed_data)
-  
-#   return all_features, featureIndexer, transformed_data
-
-#all_ensemble_features, ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
-
 def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data) :
   target       = ["Dep_Del30"]
   all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
@@ -1185,21 +1250,6 @@ all_ensemble_features, ensamble_featureIndexer, ensemble_mini_train, ensemble_tr
 
 print(all_ensemble_features)
 ensemble_mini_train.show(2)
-
-# COMMAND ----------
-
-# print(all_ensemble_features) # Show all features that are used in Ensemble.
-# # Print the transformed dataframe.
-# ensemble_transformed_data.show(4, truncate=False)
-
-# COMMAND ----------
-
-# MAGIC %md 
-# MAGIC Split data into train and test, after appling VectorIndexer.
-
-# COMMAND ----------
-
-#ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = SplitDataset(ensemble_transformed_data)
 
 # COMMAND ----------
 
@@ -1301,7 +1351,9 @@ def TrainEnsembleModels(en_train, featureIndexer, classifier) :
       
 ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
                     # Type of model we can use.
-                    RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
+                    #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
+                    #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=6, numTrees=25, impurity='gini')
+                    RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
                    )
 
 # COMMAND ----------
@@ -1524,7 +1576,7 @@ fig.show()
 # COMMAND ----------
 
 model_eval = []
-for (l2_name, l2_model)  in [("Logistic regression", model_trained_ensemble_lr), ("SVM", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
+for (l2_name, l2_model)  in [("Logistic", model_trained_ensemble_lr), ("SVM", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
   for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
       ensemble_test_prediction = FinalEnsmblePipeline(l2_model, ensemble_model, data)
@@ -1533,7 +1585,40 @@ for (l2_name, l2_model)  in [("Logistic regression", model_trained_ensemble_lr),
 
 # COMMAND ----------
 
-model_eval
+headerColor  = 'lightgrey'
+rowEvenColor = 'lightgrey'
+rowOddColor  = 'white'
+
+fig = go.Figure(data=[go.Table(
+  header=dict(
+    values=['<b>Run type</b>','<b>Accuracy</b>','<b>Precision</b>','<b>Recall</b>','<b>f-score</b>', 
+            '<b>AUROC</b>', '<b>AUPRC</b>', '<b>TP</b>', '<b>TN</b>', '<b>FP</b>', '<b>FN</b>'],
+    line_color='darkslategray',
+    fill_color=headerColor,
+    align=['left','center'],
+    font=dict(color='black', size=13)
+  ),
+  cells=dict(
+    values=[
+      [ev['l2_name'] + '<br>(' + ev['data_name'] + ')' for ev in model_eval],
+      [ev['result']['Accuracy'] for ev in model_eval],
+      [ev['result']['Precision'] for ev in model_eval],
+      [ev['result']['Recall'] for ev in model_eval],
+      [ev['result']['f-score'] for ev in model_eval],
+      [ev['result']['areaUnderROC'] for ev in model_eval],
+      [ev['result']['AreaUnderPRC'] for ev in model_eval],
+      [ev['result']['metric']['TP'] for ev in model_eval],
+      [ev['result']['metric']['TN'] for ev in model_eval],
+      [ev['result']['metric']['FP'] for ev in model_eval],
+      [ev['result']['metric']['FN'] for ev in model_eval],
+    ],
+    line_color='darkslategray',
+    align = ['left'],
+    font = dict(color = 'darkslategray', size = 13)
+    ))
+])
+fig.update_layout(width=1400, height=600)
+fig.show()
 
 # COMMAND ----------
 
@@ -1546,11 +1631,13 @@ model_eval
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## V. Applications of Course Concepts
-# MAGIC - bias-variance tradeoff
+# MAGIC ## VII. Applications of Course Concepts
+# MAGIC - bias-variance tradeoff (in dataset balancing discussion)
 # MAGIC - 1-hot encoding for SVM's? 
-# MAGIC - Breiman's method
-# MAGIC - how data is stored on cluster
+# MAGIC - Breiman's Theorem (for ordering categorical variables)
+# MAGIC - how data is stored on cluster - parquet
+# MAGIC - Scalability & sampling (for SMOTE)
+# MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
 
 # COMMAND ----------
