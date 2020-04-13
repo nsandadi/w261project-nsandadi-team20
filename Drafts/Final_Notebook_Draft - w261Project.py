@@ -180,22 +180,7 @@ train_and_val = WriteAndRefDataToParquet(train.union(val), 'train_and_val')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Notes for II. EDA & Discussion of Challenges
-# MAGIC - 2-3 EDA Tasks to help make decisions on how we implement the algorithm to be scalable
-# MAGIC     - Binning could be a way to scale decision tree algorithms (when defining splits, e.g. CRS_Dep_Time)
-# MAGIC     - More customized binning for the origin-destination to fit some custom criterion (to make new features)
-# MAGIC     - Brieman's Theorem can help with binning on categorical variables -- we could do an EDA task to rank some categorical variables (reduce number of possible splits -- bring order to unordered cateogrical variables)
-# MAGIC - Challenges anticipated based on EDA
-# MAGIC     - Cleaning/joining datasets?
-# MAGIC     - Feature Selection (or feature augmentation)
-# MAGIC     - gradient descent for logistic regression?
-# MAGIC     - sharing clusters, not being able to load entire dataset into memory (but can load fractions and/or aggregations of it!)
-# MAGIC     - store data to optimize for column/row retrieval based on algorithm (parquet for DT & avro for LR)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### EDA Task #1: Exploring & Binning Continuous Features
+# MAGIC ### EDA Task #1: Binning Continuous Features
 # MAGIC Among the features that we have to consider for predicting departure delays, we have 4 that are relatively continuous and can take on thousands of different values: `CRS_Dep_Time`, `CRS_Arr_Time`, `CRS_Elapsed_Time`, and `Distance`. Let's primarily focus on the variable `CRS_Elapsed_Time` to motivate this discussion and we'll generalize it to the remaining 3 variables. Below is a plot showing the bulk of the distribution for the feature `CRS_Elapsed_Time`.
 
 # COMMAND ----------
@@ -233,17 +218,9 @@ MakeRegBarChart(train_and_val, outcomeName, var, orderBy=var, barmode='stack', x
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC From the plot above, we again see the continuous nature of `CRS_Elapsed_Time`, with the majortiy of flights ranging between 50 to 200 minutes. Note that each of the taller bars correspond to flight durations at the 5-minute markers (60, 65, 70, etc), as these are more "convenient" flight durations to work with. 
+# MAGIC From the plot above, we can see the continuous nature of `CRS_Elapsed_Time`, with the majortiy of flights ranging between 50 to 200 minutes. Note that each of the taller bars correspond to flight durations at the 5-minute markers (60, 65, 70, etc), as these are more "convenient" flight durations that airlines tend to define when scheduling their flights. 
 # MAGIC 
-# MAGIC Now, if we consider the possible values that `CRS_Elapsed_Time` can intrinsically take on, it can be any number of minutes that the flight is scheduled to take; these could be values such as 60 minutes, 65 minutes, 120 minutes, even going onto 400 minutes in some cases, as evident above. Conceptually speaking, some of these times are drasticaly different (60 minutes vs. 400 minutes), while others are similar enough that they would be considered the same flight duration (60 minutes vs. 65 minutes). Because of this, 
-# MAGIC 
-# MAGIC 
-# MAGIC * There are a lot of unique departure & arrival times that are numerical features, but the time 2300 isn't much different from 2305 to 2310
-# MAGIC * May be worthwhile to bin things
-# MAGIC     - fewer splits for decision tree to consider
-# MAGIC     - can estimate effects of unique time blocks departure delays (more meaningful/interpretable)
-# MAGIC     - do have more coefficients to estimate in LR (1 for each bin value)
-# MAGIC * Show barplots of delay/no delay distributions for numerical values and binned values (maybe even show ordered by probability of departure delay--Diana EDA)
+# MAGIC Now, if we consider the possible values that `CRS_Elapsed_Time` can intrinsically take on, it can be any number of minutes that the flight is scheduled to take; these could be values such as 60 minutes, 65 minutes, 120 minutes, even going onto 400 minutes in some cases, as evident above. Conceptually speaking, some of these times are drasticaly different (60 minutes vs. 400 minutes), while others are similar enough that they would be considered the same flight duration (60 minutes vs. 65 minutes). Because of this, these flight times could be aggregated into bins in order to group similar flight durations. For example, we could aggregate the `CRS_Elapsed_Time` into 1-hour blocks, which will produce a distribution such as the one shown below:
 
 # COMMAND ----------
 
@@ -269,34 +246,40 @@ def BinValuesForEDA(df, var, splits, labels):
 # Make plot with binned version of CRS_Elapsed_Time
 d = BinValuesForEDA(train_and_val, var, 
                     splits = [float("-inf"), 60, 120, 180, 240, 300, 360, float("inf")], 
-                    labels = ['0-1 hour', '1-2 hours', '2-3 hours', '3-4 hours', '4-5 hours', '5-6 hours', '6+ hours'])
+                    labels = ['0-1 hours', '1-2 hours', '2-3 hours', '3-4 hours', '4-5 hours', '5-6 hours', '6+ hours'])
 MakeRegBarChart(d, outcomeName, var + "_binlabel", orderBy=var + "_binlabel", barmode='stack', xtype='category')
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### EDA Task #2: Categorical Variables & Reducing # of Splits (for Decision Trees)
-# MAGIC * Some categorical variables have few values (e.g. carrier)
-# MAGIC      - good for Decision Trees, because it introduces fewer splits to have to consider
-# MAGIC      - can still define distinct sets of delayed & not delayed airlines
-# MAGIC      - show probability charts b/c clearly some are more delayed than others
-# MAGIC * Other categorical variables have a lot of values (e.g. origin/dest airports) & have no implicit ordering
-# MAGIC      - should incorporate things like Breiman's method to reduce number of splits for decision trees
-# MAGIC      - effectivley want to give an ordering to categories
-# MAGIC      - using Breiman's method makes things more scalable
-# MAGIC      - Can rank, for example based on probability of delay and use this ranking in place of actual origin/dest categories
+# MAGIC By doing this kind of binning, we can see that the same general shape of the distribution is preserved, albeit at a coarser level, which removes some of the extra information that was present in the original variable. But doing this kind of aggregation has its benefits when it comes to modeling. 
+# MAGIC 
+# MAGIC In the case of Logistic Regression, if we had referred to the original `CRS_Elapsed_Time`, we would estimate a single coefficient for the variable, which would tell us the effect that adding 1 minute to the elapsed time would have on the probability that a flight is delayed. However, if we were to bin this variable and treat the result as a categorical variable in our regression, the model would estimate a coefficient for all but one of the bins, which would tell us more detailed information about the effect of a flight having a certain kind of duration (e.g. 1-2 hours). By comparison to the coefficient we'd estimate on the raw `CRS_Elapsed_Time`, this would be a much more meaningful estimate to use to understand the underlying factors for departure delays. This will require the algorithm to have to learn more coefficients than if the original `CRS_Elapsed_Time` were to be used, but to answer our core question, it seems to be a worthwhile cost if we proceed with Logistic Regression as our model of choice.
+# MAGIC 
+# MAGIC For the case of Decision Trees, binning the `CRS_Elapsed_Time` will actually help to improve the scalability of the algorithm. If we are to use the raw `CRS_Elapsed_Time`, the decision tree algorithm will have to consider every possible split for the feature (as we'll see later, there are in fact 646 distinct values for the `CRS_Elapsed_Time` feature, meaning that the algorithm would have to consider 645 different splits when finding the best split). However, if we bin the feature as shown above, the number of splits the algorithm needs to consider drops to just 6, which is a large reduction in the amount of work the algorithm needs to do to find the best split, which will help with the scalability of the algorithm.
+# MAGIC 
+# MAGIC The benefits that come with binning `CRS_Elapsed_Time` can really extend to all our continuous variables. The `Distance_Group` already takes care of this for the feature `Distance` and in section III, we will take care bin the remaining continuous variable depending on the situation.
 
 # COMMAND ----------
 
-# Helper function for Group 3 graphs that plot the probability of outcome on the x axis, the number of flights on the x axis
-# With entries for each distinct value of the feature as separate bars.
+# MAGIC %md
+# MAGIC ### EDA Task #2: Ordering Categorical Features
+# MAGIC Among the features we have to consider, there are three that are categorical in nature, namely `Op_Unique_Carrier`, `Origin`, and `Dest`. While some features such as `Op_Unique_Carrier` have only a few distinct values (19 in total), others such as `Origin` and `Dest` have many more distinct values (364 each). While these categorical features are meaningful to us, they can introduce some added difficulties to our models for training.
+# MAGIC 
+# MAGIC In the case of Support Vector Machines, each of these categorical features will have to be encoded with 1-hot encoding, where we generate a sparse vector of a length equal to the number of unique values in the categorical feature. For `Op_Unique_Carrier`, this would lead to the algorithm to have to consider a 19-dimensional space. Take it to `Origin` or `Dest` and these features alone will require considering a 364-dimensional space, which makes it difficult for the algorithm to scale.
+# MAGIC 
+# MAGIC Similarly for Logistic Regression, for a categorical feature with \\(n\\) distinct values, this will require estimating \\(n-1\\) unique coefficients--while these coefficients can be meaningful to us, the sheer number can be overwhelming to estimate from a scalability perspective. 
+# MAGIC 
+# MAGIC And with Decision Trees, the issue comes when considering the number of splits. If we take the `Op_Unique_Carrier` feature, because there are 19 values with no implicit order to them, when the Decision Tree algorithm considers all possible splits, it will have to consider not 18 splits, but \\(2^{k-1}-1 = 2^{19-1}-1 = 262,143\\) possible splits. Go even further to a categorical variable like `Origin` and the number becomes massive (\\(1.87 * 10^{109}\\) different splits to consider), which is computationally prohibitive to the algorithm as it will need to consider every single possible split to find the best split for the feature.
+# MAGIC 
+# MAGIC In order to address these issues, we'd really want to provide some sort of ordering and thus a ranking for each distinct value of our categorical features. Let's consider this in the context of our 'smaller' categorical variable, `Op_Unique_Carrier`. In its raw form, the distinct categories are in no way comparable (how does one compare 'DL' (Delta Airlines) to 'AS' (Alaska Airlines) in a meaningful way?). However, these categories could be compared using some intrinsic property of the category. Given that we're interested in using the information in `Op_Unique_Carrier` to predict our outcome `Dep_Del30`, we can evaluate what our average outcome is (or really the probability of a significant departure delay) for each variable and use this measure as a means of ordering the distinct categories. This ordering is shown in the plot below:
 
+# COMMAND ----------
+
+# Helper function that plot the probability of outcome on the x axis, the number of flights on the y axis
+# With entries for each distinct value of the feature as separate bars.
 def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   # Filter out just to rows with delays or no delays
-  threshold = 30
-  outcomeName = 'Dep_Del' + str(threshold)
-  if (outcomeName not in full_data_dep.columns):
-    full_data_dep = full_data_dep.withColumn(outcomeName, (full_data_dep['Dep_Delay'] >= threshold).cast('integer'))
   d_delay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 1.0).groupBy(var, outcomeName).count().orderBy("count")
   d_nodelay = full_data_dep.select(var, outcomeName).filter(F.col(outcomeName) == 0.0).groupBy(var, outcomeName).count().orderBy("count")
 
@@ -335,34 +318,32 @@ def MakeProbBarChart(full_data_dep, var, xtype, numDecimals):
   fig.show()
   
 # Plot Carrier and outcome with bar plots of probability on x axis
-# Airline Codes to Airlines: https://www.bts.gov/topics/airlines-and-airports/airline-codes
 MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecimals=5)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### EDA Task #3: Unbalanced Dataset
-# MAGIC * Show how dataset is drastically unbalanced (especially as you increase the dep_delay threshold)
-# MAGIC * Discuss stacking and what that tries to do (how we'll eventually want an ensemble approach to support this)
-# MAGIC * If can get SMOTE working to be scalable, also discuss SMOTE and what it effectively does
-# MAGIC    - do discuss scalability concerns, b/c do need to apply knn algo & predict on each datapoint
-# MAGIC * Discuss how balancing the dataset with stacking or SMOTE allows us to ensure that our models don't become biased towards the no-delay class, but it does introduce some more variance (bias-variance tradeoff)
-
-# COMMAND ----------
-
-# Look at balance for outcome in training
-display(airlines.groupBy(F.col('Dep_Delay') >= 30).count().sort(F.col('Dep_Delay') >= 30))
+# MAGIC By ordering the airline carriers by this average outcome (`Prob_Dep_Del30`), we can not only begin to compare the airlies (Alaska Airlines seems to be better than Delta Airlines by a small margin), but we can actually strongly reduce the number of splits to consider from 262,143 possible splits to just 18 for `Op_Unique_Carrier` when it comes to the Decision Tree algorithm. Even further, if we assign numerical ranks, we have the potential to convert this categorical feature into a numerical feature (by assigning 1 to the highest ranked airline, 'HA' (Hawaiian Airlines), and 19 to the lowest ranked airline 'B6' (Jet Blue)), which helps to reduce the workload for both Logistic Regression and Support Vector Machines. 
+# MAGIC 
+# MAGIC This data transformation essentially describes the application of Breiman's Theorem, which we can apply to all our categorical features, even the ones we feature engineer. Note that any ranking we generate for our categorical features will need to be generated based on our training set and separately applied to the test set, to ensure the ranking isn't in any way influenced by the data in our test set. We will proceed to apply this to all our categorical features in section III. 
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Challenges when send algorithms to scale
-# MAGIC * For training Decision Tree, will want to rely on parquet format (since we do feature eval independently for each row)
-# MAGIC * for Decision Tree Prediction, we'll likely want avro format (since we do inference on unique rows)
-# MAGIC * for Logistic regression training & prediction, we'll want to train & predict on avro
-# MAGIC * SVM challenges with categorical variables with large numbers of cateogries (origin & dest--will have very long 1-hot encoded vectors)
-# MAGIC * Naive Bayes ____________________
-# MAGIC * For Ensemble methods, training models in parallel
+# MAGIC ### EDA Task #3: Balancing the Dataset
+# MAGIC For our final EDA task, let's consider our outcome variable `Dep_Del30`. To ensure that our model is able to adequately predict whether a flight will be delayed, we need to make sure there is a good representation of both classes in the training set. However, as is evident in the pie chart below, we clearly have an over-representation of the no-delay category (`Dep_Del30 == 0`).
+
+# COMMAND ----------
+
+# Look at balance for outcome in training
+display(train_and_val.groupBy(outcomeName).count())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC What this chart tells us is that a simple model that always predicts no departure delay will have a high accuracy of around 89% (assuming our test set has a similar distribution). But of course, simply predicting the majority class is meaningless when it comes to answering our core question--all it really tells us is that most flights are not delayed.
+# MAGIC 
+# MAGIC But the problem extends further. Even if we develop a model that doesn't always predict no departure delay as a simple baseline model would, there is still a major problem of bias if we leave the dataset unbalanced. Namely, if the dataset is unbalanced, the model will still favor the majority class and learn features of majority class well at the expense of the minority class, which will come at a cost to model performance. Regardless of which of our four algorithms we'll concentrate on, this data imbalance is a concern that we'll need to address. There are a variety of methods that we can use to deal with this data imbalance (including majority class undersampling, minority class oversampling, SMOTE, majority class splitting), which we will discuss the theory, implementation, and scalability concerns at the end of section III. Any method that will balance the dataset will help to reduce bias, coming at a cost to inducing more variance in the model. However, for the purpose of developing a model that can help inform the likely causes of departure delays, this is a worthwhile tradeoff.
 
 # COMMAND ----------
 
@@ -427,7 +408,7 @@ display(train_and_val.select([F.count(F.when(F.isnan(c) | F.col(c).isNull(), c))
 # MAGIC * General EDA of vars
 # MAGIC * Binning
 # MAGIC * Interaction Terms
-# MAGIC * Ordering of Categorical Variables (Brieman's Theorem)
+# MAGIC * Ordering of Categorical Variables (Breiman's Theorem)
 # MAGIC * only do modifications to training split
 # MAGIC * save result to cluster
 
@@ -621,11 +602,11 @@ display(airlines.take(1000))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Apply Brieman's Theorem to Categorical Features
+# MAGIC ### Apply Breiman's Theorem to Categorical Features
 
 # COMMAND ----------
 
-# Regenerate splits for Brieman ranking prep
+# Regenerate splits for Breiman ranking prep
 mini_train, train, val, test = SplitDataset(airlines)
 
 # COMMAND ----------
@@ -637,46 +618,46 @@ from pyspark.sql import Window
 # Generates the ranking of the categories in the provided categorical feature
 # Orders the categories by the average outcome ascending, from integer 1 to n
 # Note that this should only be run on the training data
-def GenerateBriemanRanks(df, catFeatureName, outcomeName):
+def GenerateBreimanRanks(df, catFeatureName, outcomeName):
   window = Window.orderBy('avg(' + outcomeName + ')')
-  briemanRanks = df.groupBy(catFeatureName).avg(outcomeName) \
+  breimanRanks = df.groupBy(catFeatureName).avg(outcomeName) \
                    .sort(F.asc('avg(' + outcomeName + ')')) \
                    .withColumn(catFeatureName + "_brieman", F.row_number().over(window))
-  return briemanRanks
+  return breimanRanks
 
-# Using the provided Brieman's Ranks, applies Brieman's Method to the categorical feature
-# and creates a column in the original table using the mapping in briemanRanks variable
+# Using the provided Breiman's Ranks, applies Breiman's Method to the categorical feature
+# and creates a column in the original table using the mapping in breimanRanks variable
 # Note that this effectively transforms the categorical feature to a numerical feature
-# The new column will be the original categorical feature name, suffixed with '_brieman'
-def ApplyBriemansMethod(df, briemanRanks, catFeatureName, outcomeName):
-  if (catFeatureName + "_brieman" in df.columns):
+# The new column will be the original categorical feature name, suffixed with '_breiman'
+def ApplyBreimansMethod(df, breimanRanks, catFeatureName, outcomeName):
+  if (catFeatureName + "_breiman" in df.columns):
     print("Variable '" + catFeatureName + "_brieman" + "' already exists")
     return df
   
-  res = df.join(F.broadcast(briemanRanks), df[catFeatureName] == briemanRanks[catFeatureName], how='left') \
-          .drop(briemanRanks[catFeatureName]) \
-          .drop(briemanRanks['avg(' + outcomeName + ')']) \
+  res = df.join(F.broadcast(breimanRanks), df[catFeatureName] == breimanRanks[catFeatureName], how='left') \
+          .drop(breimanRanks[catFeatureName]) \
+          .drop(breimanRanks['avg(' + outcomeName + ')']) \
           .fillna(-1, [catFeatureName + "_brieman"])
   return res
 
 # COMMAND ----------
 
-# Apply brieman ranking to all datasets, based on ranking developed from training data
-briemanRanksDict = {} # save to apply later as needed
-featuresToApplyBriemanRanks = catFeatureNames + intFeatureNames + holFeatureNames
-for feature in featuresToApplyBriemanRanks:
+# Apply breiman ranking to all datasets, based on ranking developed from training data
+breimanRanksDict = {} # save to apply later as needed
+featuresToApplyBreimanRanks = catFeatureNames + intFeatureNames + holFeatureNames
+for feature in featuresToApplyBreimanRanks:
   # Get ranks for feature, based on training data only
-  ranksDict = GenerateBriemanRanks(train, feature, outcomeName)
-  briemanRanksDict[feature] = ranksDict
+  ranksDict = GenerateBreimanRanks(train, feature, outcomeName)
+  breimanRanksDict[feature] = ranksDict
   
-  # Apply Brieman's method & do feature transformation for all datasets
-  mini_train = ApplyBriemansMethod(mini_train, ranksDict, feature, outcomeName)
-  train = ApplyBriemansMethod(train, ranksDict, feature, outcomeName)
-  val = ApplyBriemansMethod(val, ranksDict, feature, outcomeName)
-  test = ApplyBriemansMethod(test, ranksDict, feature, outcomeName)
-  airlines = ApplyBriemansMethod(airlines, ranksDict, feature, outcomeName)
+  # Apply Breiman's method & do feature transformation for all datasets
+  mini_train = ApplyBreimansMethod(mini_train, ranksDict, feature, outcomeName)
+  train = ApplyBreimansMethod(train, ranksDict, feature, outcomeName)
+  val = ApplyBreimansMethod(val, ranksDict, feature, outcomeName)
+  test = ApplyBreimansMethod(test, ranksDict, feature, outcomeName)
+  airlines = ApplyBreimansMethod(airlines, ranksDict, feature, outcomeName)
   
-briFeatureNames = [entry + "_brieman" for entry in briemanRanksDict]
+briFeatureNames = [entry + "_brieman" for entry in breimanRanksDict]
 
 # COMMAND ----------
 
@@ -694,7 +675,7 @@ print(" - Binned Features: \t\t", binFeatureNames) # numerical features
 print(" - Interaction Features: \t", intFeatureNames) # categorical features
 print(" - Holiday Feature: \t\t", holFeatureNames) # categorical features
 print(" - Origin Activity Feature: \t", orgFeatureNames) # numerical features
-print(" - Brieman Ranked Features: \t", briFeatureNames) # numerical features
+print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 
 # COMMAND ----------
 
@@ -831,9 +812,12 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator
 import pandas as pd
 # Evaluates model predictions for the provided predictions
 # Predictions must have two columns: prediction & label
-def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
-    print("Model Evaluation - " + dataName)
-    print("-----------------------------")
+def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', ReturnVal=False):
+    
+    if not ReturnVal :
+      print("Model Evaluation - " + dataName)
+      print("-----------------------------")
+      
     evaluation_df = (predict_df \
                      .withColumn('metric', F.concat(F.col(outcomeName), F.lit('-'), F.col("prediction"))).groupBy("metric") \
                      .count() \
@@ -853,6 +837,13 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label'):
     evaluator = BinaryClassificationEvaluator(rawPredictionCol="rawPrediction", labelCol=outcomeName)
     areaUnderROC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderROC"})
     areaUnderPRC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderPR"})
+    if ReturnVal : return {'Accuracy' : round(accuracy, 7), 
+                           'Precision' : round(precision, 7), 
+                           'Recall' : round(recall, 7), 
+                           'f-score' : round(fscore, 7), 
+                           'areaUnderROC' : round(areaUnderROC, 7), 
+                           'AreaUnderPRC' : round(areaUnderPRC, 7),
+                           'metric' : metric}
     print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}, AreaUnderPRC = {}".format(
         round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPRC, 7))),
     print("\nConfusion Matrix:\n", pd.DataFrame.from_dict(metric, orient='index', columns=['count']), '\n')
@@ -1147,10 +1138,6 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 
 # COMMAND ----------
 
-mini_train.columns
-
-# COMMAND ----------
-
 # def TransformDataForEnsemble(full_dataset):
 
 #   # Convert strings to index
@@ -1175,18 +1162,35 @@ mini_train.columns
 
 #all_ensemble_features, ensamble_featureIndexer, ensemble_transformed_data = TransformDataForEnsemble(airlines)
 
-def TransformDataForEnsemble(train_data, val_data, test_data) :
+def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data) :
   target       = ["Dep_Del30"]
-  all_features = ["Month", "Day_Of_Month", "Day_Of_Week", "Distance", 'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin', "Op_Unique_Carrier_index", "Origin_index", "Dest_index", "Holiday_index", "Origin_Activity"]
+  all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
   
+  assembler = VectorAssembler(inputCols=all_features, outputCol="features")
+  ensemble_pipeline = Pipeline(stages=[assembler])
+
+  tmp_mini_train, tmp_train, tmp_val, tmp_test = (ensemble_pipeline.fit(mini_train_data).transform(mini_train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
+                                                  ensemble_pipeline.fit(train_data).transform(train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
+                                                  ensemble_pipeline.fit(val_data).transform(val_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
+                                                  ensemble_pipeline.fit(test_data).transform(test_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))
+  
+  featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train
+                                                                                                          .union(tmp_val)
+                                                                                                          .union(tmp_test))
+  
+  return all_features, featureIndexer, tmp_mini_train, tmp_train, tmp_val, tmp_test
 
 
+all_ensemble_features, ensamble_featureIndexer, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = TransformDataForEnsemble(mini_train, train, val, test)
+
+print(all_ensemble_features)
+ensemble_mini_train.show(2)
 
 # COMMAND ----------
 
-print(all_ensemble_features) # Show all features that are used in Ensemble.
-# Print the transformed dataframe.
-ensemble_transformed_data.show(4, truncate=False)
+# print(all_ensemble_features) # Show all features that are used in Ensemble.
+# # Print the transformed dataframe.
+# ensemble_transformed_data.show(4, truncate=False)
 
 # COMMAND ----------
 
@@ -1195,7 +1199,7 @@ ensemble_transformed_data.show(4, truncate=False)
 
 # COMMAND ----------
 
-ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = SplitDataset(ensemble_transformed_data)
+#ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test = SplitDataset(ensemble_transformed_data)
 
 # COMMAND ----------
 
@@ -1332,7 +1336,7 @@ for key, value in plt.items() :
     fig.add_trace(go.Bar(
       x=plt[key]['features'],
       y=plt[key]['importance'],
-      marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
       name = '',
       showlegend = False,
     ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
@@ -1519,11 +1523,17 @@ fig.show()
 
 # COMMAND ----------
 
+model_eval = []
 for (l2_name, l2_model)  in [("Logistic regression", model_trained_ensemble_lr), ("SVM", model_trained_ensemble_svm), ("Random Forest", model_trained_ensemble_rf)] :
   for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
       ensemble_test_prediction = FinalEnsmblePipeline(l2_model, ensemble_model, data)
-      EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name)
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+      model_eval.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
+
+# COMMAND ----------
+
+model_eval
 
 # COMMAND ----------
 
