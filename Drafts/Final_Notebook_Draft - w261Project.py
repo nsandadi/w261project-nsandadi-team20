@@ -797,53 +797,53 @@ def kmeans_model(featureVect, k):
 
 # Calculate the Euclidean distance between two feature vectors
 def euclidean_distance(row1, row2):
-   """
-   Function to calculate Euclidean distance.
-     arg:
-         row1, row2 - (list) feature vector
-     returns:
-         distance - (float) euclidean distance between two feature vectors
-    """
-	distance = 0.0
-	for i in range(len(row1)-1):
-		distance += (row1[i] - row2[i])**2
-	return math.sqrt(distance)
+  """
+  Function to calculate Euclidean distance.
+   arg:
+       row1, row2 - (list) feature vector
+   returns:
+       distance - (float) euclidean distance between two feature vectors
+  """
+  distance = 0.0
+  for i in range(len(row1)-1):
+      distance += (row1[i] - row2[i])**2
+  return math.sqrt(distance)
   
 # Locate the nearest neighbors
 def get_neighbors(train, test_row, num_neighbors):
-    """
-    Function to calculate nearest neighbors.
-     arg:
-         train - (list) list of feature vectors from which to find nearest neighbors
-         test_row - (list) feature vector under consideration whose nearest neighbors must be found
-         num_neighbors - (int) number of nearest neighbors
-     returns:
-         neighbors - (list) nearest neighbors
-    """
-	distances = list()
-	for train_row in train:
-		dist = euclidean_distance(test_row, train_row)
-		distances.append((train_row, dist))
-	distances.sort(key=lambda tup: tup[1])
-	neighbors = list()
-	for i in range(num_neighbors):
-		neighbors.append(distances[i+1][0])
-	return neighbors
+  """
+  Function to calculate nearest neighbors.
+   arg:
+       train - (list) list of feature vectors from which to find nearest neighbors
+       test_row - (list) feature vector under consideration whose nearest neighbors must be found
+       num_neighbors - (int) number of nearest neighbors
+   returns:
+       neighbors - (list) nearest neighbors
+  """
+  distances = list()
+  for train_row in train:
+      dist = euclidean_distance(test_row, train_row)
+      distances.append((train_row, dist))
+  distances.sort(key=lambda tup: tup[1])
+  neighbors = list()
+  for i in range(num_neighbors):
+      neighbors.append(distances[i+1][0])
+  return neighbors
   
 # Generate synthetic records
 def synthetic(list1, list2):
-    """
-    Function to generate synthetic data.
-     arg:
-         list1, list2 - (list) feature vectors from which synthetic data point is generated
-     returns:
-         synthetic_records - (list) synthetic data
-    """
-    synthetic_records = []
-    for i in range(len(list1)):
-      synthetic_records.append(round(list1[i] + ((list2[i]-list1[i])*random.uniform(0, 1))))
-    return synthetic_records
-  
+  """
+  Function to generate synthetic data.
+   arg:
+       list1, list2 - (list) feature vectors from which synthetic data point is generated
+   returns:
+       synthetic_records - (list) synthetic data
+  """
+  synthetic_records = []
+  for i in range(len(list1)):
+    synthetic_records.append(round(list1[i] + ((list2[i]-list1[i])*random.uniform(0, 1))))
+  return synthetic_records
+
   
 # RUNNING SMOTE AT SCALE
 
