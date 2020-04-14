@@ -24,10 +24,11 @@
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col
 from pyspark.sql.functions import when
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DateType
 from pyspark.sql.functions import udf
 
 from pyspark.ml import Pipeline
+import pyspark.ml.pipeline as pl
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.classification import DecisionTreeClassifier
 from pyspark.ml.classification import NaiveBayes
@@ -150,10 +151,10 @@ def SplitDataset(airlines):
 # Write train & val data to parquet for easier EDA
 def WriteAndRefDataToParquet(data, dataName):
   # Write data to parquet format (for easier EDA)
-  data.write.mode('overwrite').format("parquet").save("dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+  data.write.mode('overwrite').format("parquet").save("dbfs:/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
   
   # Read data back directly from disk 
-  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+  return spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
 
 # Split dataset into training/validation/test; use mini_train to help with quick testing
 mini_train, train, val, test = SplitDataset(airlines)
@@ -351,7 +352,7 @@ display(train_and_val.groupBy(outcomeName).count())
 
 # MAGIC %md
 # MAGIC ### Further EDA
-# MAGIC During the investigation of our dataset, we did a deep dive to examine all of our in-scope variables from the original dataset to understand the nature of the dataset and help inform our decision making. To see more plots and discussion, please refer to our more extensive EDA here: 
+# MAGIC During the investigation of our dataset, we did a deep dive to examine all of our in-scope variables from the original dataset to understand the nature of the dataset and help inform our decision making. To see more plots and discussion, please refer to our more extensive EDA linked below. We will also explore some more of these plots in the next section.
 # MAGIC 
 # MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/3895804345790408/command/3895804345790409
 
@@ -416,7 +417,7 @@ fig2 = MakeRegBarChart(train_and_val, outcomeName, 'CRS_Arr_Time', orderBy='CRS_
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC From the distributions of values for `CRS_Dep_Time` and `CRS_Arr_Time`, we can see clusters of flights defined by --00 to --59 blocks (these clusters are a remnant of the structure of the 2400-clock, since there are no valid times from --60 to --99). With that said, by analyzing any one of these clusters, it's clear that most flights are scheduled at 5-minute markers (such as 1200, 1205, 1210, etc). Since there really isn't a big difference between times separated by a couple of 5 minute intervals, we will choose to bin these values by 10-minute increments to ensure we still have enough data granularity to differentiate between populate times such as 1200 and 1230 but not too much granularity to have too many splits to consider (reducing to 10-minute granularity alone reduces the number of splits for a Decision Tree algorithm to consider from at most 1439 to just about 144 split points).
+# MAGIC From the distributions of values for `CRS_Dep_Time` and `CRS_Arr_Time`, we can see clusters of flights defined by --00 to --59 blocks (these clusters are a remnant of the structure of the 2400-clock, since there are no valid times from --60 to --99). With that said, by analyzing any one of these clusters, it's clear that most flights are scheduled at 5-minute markers (such as 1200, 1205, 1210, etc) for both departure and arrival times. Since there really isn't a big difference between times separated by a couple of 5 minute intervals, we will choose to bin these values by 10-minute increments to ensure we still have enough data granularity to differentiate between populate times such as 1200 and 1230 but not too much granularity to have too many splits to consider (reducing to 10-minute granularity alone reduces the number of splits for a Decision Tree algorithm to consider from at most 1439 to just about 144 split points).
 
 # COMMAND ----------
 
@@ -458,9 +459,9 @@ display(airlines.select(contNumFeatureNames + binFeatureNames + ['Distance_Group
 
 # MAGIC %md
 # MAGIC ### Interacting Features
-# MAGIC During our in-depth EDA, we investigated a few interactions based on intuition. From our own experiences, certain temporal interaction terms and airport-related interactions would intuitively be indicative of a flight that is more likely to experience a departure delay.
+# MAGIC During our in-depth EDA, we investigated a few interactions based on intuition. From our own experiences, we believed that certain temporal interaction terms and airport-related interactions would intuitively be indicative of a flight that is more likely to experience a departure delay.
 # MAGIC 
-# MAGIC Let's consider the features `Month` and `Day_Of_Month`. On their own, we may be able to capture aggregated information about flights delays on a particular day of the month or a particular month on its own. But if we interact the two, we get the concept of `Day_Of_Year`, and upon closer inspection, there do appear to be certain days of the year that experience more traffic and more delays. Take the stacked bar chart comparing the ratio of delayed and no-delay flights shown below for `Day_Of_Year`, which is the concatenation of `Month` and `Day_Of_Month`. From this chart, we can see that there is a higher probability of departure delays for dates in the summer, as well as near the end of December and beginning of January, but not on specific holidays. Because there does appear to be some relationship between `Day_Of_Year` and the likelihood of a departure delay, we choose to add this as one of our interaction terms.
+# MAGIC Let's consider the features `Month` and `Day_Of_Month`. On their own, we may be able to capture aggregated information about flights delays on a particular day of the month or a particular month on its own. But if we interact the two, we get the concept of `Day_Of_Year`, and upon closer inspection, there do appear to be certain days of the year that experience more traffic and more delays. Take the stacked bar chart comparing the ratio of delayed and no-delay flights shown below for `Day_Of_Year`, which is the concatenation of `Month` and `Day_Of_Month`. From this chart, we can see that there is a higher probability of departure delays for dates in the summer, as well as near the end of December and beginning of January, but not on holidays in that time frame (e.g. December 25th - Christmas Day). Because there does appear to be some relationship between `Day_Of_Year` and the likelihood of a departure delay, we choose to add this as one of our interaction terms.
 
 # COMMAND ----------
 
@@ -476,7 +477,9 @@ display(d)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Another set of interaction terms that we considered was the departure/arrival "time of week". We know from EDA that there are some days of the week that experience more delays/traffic and others that experience less; same goes for the time of day. 
+# MAGIC Along a similar vein of thinking, we decided to add the interaction of `CRS_Dep_Time` and `Day_Of_Week` along with the interaction of `CRS_Arr_Time` and `Day_Of_Week` to produce `Dep_Time_Of_Week` and `Arr_Time_Of_Week` respectively. We discovered that there are certain times of day that encounter a higher likelihood of departure delays, depending on the day of the week these times fall on. But to ensure there are not too many categories in this new categorical feature, we will interact the binned times with the `Day_Of_Week` for each interaction.
+# MAGIC 
+# MAGIC Finally, we considered that there may be some inherent relationship between the origin airport and the destination airport with respect to departure delays that may be well captured via an interaction between the two variables. Namely, during our EDA, we saw that more popular flights (such as between SFO (San Francisco) and LAX (Los Angeles)) also saw higher levels of departure delays, whereas less popular flights (such as between SEA (Seattle) and PHX (Pheonix)) saw lower levels of departure delays. Thus, we chose to interact `Origin` and `Dest` to form the categorical feature `Origin-Dest` for our dataset. All the interactions discussed are added using the provided code and a few examples are shown below:
 
 # COMMAND ----------
 
@@ -501,12 +504,16 @@ interactions = [('Month', 'Day_Of_Month', 'Day_Of_Year'),
                 ('Day_Of_Week', 'CRS_Arr_Time_bin', 'Arr_Time_Of_Week')]
 intFeatureNames = [i[2] for i in interactions]
 airlines = AddInteractions(airlines, interactions)
-display(airlines.take(6))
+
+display(airlines.select(['Month', 'Day_Of_Month', 'Day_Of_Year', 'Day_Of_Week', 'CRS_Dep_Time_bin', 'Dep_Time_Of_Week', 'Day_Of_Week', 'CRS_Arr_Time_bin', 'Arr_Time_Of_Week', 'Origin', 'Dest', 'Origin_Dest']).take(6))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Add Holidays Feature
+# MAGIC With the `Day_Of_Year` variable in mind, we'd noted during the EDA that the likelihood of a departure delay, as well as the number of flights occuring on a given day of the year seemed to have some relationship with the commonly celebrated holidays in the United States. Take Christmas Day, which always falls on December 25th. If we examine the plot shown previously, there was generally a lower probability of delay on Christmas Day and Christmas Eve, with higher probabilities immediately before and after those two days. Intuitively, one would expect a higher probability of departure delay as people try to get home for the holidays or leave promptly after the holidays are over but on the day of holidays, people generally stay home. There are a variety of cases where holidays and days near holidays seem to reflect something about the likelihood of a flight experiencing a departure delay. 
+# MAGIC 
+# MAGIC For this reason, we attempted to capture this information by joining a dataset of government holidays to our original *Airlines Delays* dataset and construct the `Holiday` feature. This feature is a categorical feature
 
 # COMMAND ----------
 
@@ -916,6 +923,11 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_km
 
 # COMMAND ----------
 
+# MAGIC %sh
+# MAGIC ls -l /databricks/dbfs/user/team20/finalnotebook/*.parquet
+
+# COMMAND ----------
+
 # DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
 # Read prepared data from parquet for training
 def ReadDataFromParquet(dataName):
@@ -935,14 +947,14 @@ train_smoted = ReadDataFromParquet('augmented_smoted_train_kmeans')
 
 # Numerical Variables to use for training
 outcomeName = 'Dep_Del30'
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] ##
 contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
 catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
-binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
+binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin'] ##
 intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
 holFeatureNames = ['Holiday']
-orgFeatureNames = ['Origin_Activity']
-briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
+orgFeatureNames = ['Origin_Activity'] ##
+briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman'] ##
 
 # COMMAND ----------
 
@@ -970,6 +982,11 @@ briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman'
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Condiderations for Algorithm Exploration
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC For the algorithm exploration the important considerations were as follows:       
 # MAGIC - Algorithm must scale 
 # MAGIC - it must be suitable for classification
@@ -985,7 +1002,12 @@ briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman'
 # MAGIC 
 # MAGIC Theoretically logistic regression is very easy to model, interpret and train. The main limitation of logistic regression is the **multi-collinearity** among the features. Logisitc regression is also susceptible to overfitting due to imbalanced data. Support verctor machines on the other hand is not suitable for large datasets. As these algorithms use hyperplanes it is much harder to interpret them. Larger data sets take a long time to process in relation to other models. With Naive Bayes, they are easy to process and scale really well. Like logistic regression it makes an assumption that features are independent of each other which is not true in many cases.
 # MAGIC 
-# MAGIC Decision trees also seemed theoretically promising. Compared to other algorithms desicion trees require less data preparation during pre-processing. It also doesn't require normalization or scaling and can handle null values gracefully. It is also easily interpretable. They require higher time to train the model. But based on the keypoints discussed able we picked the decision tree as our algorithm to move forward.
+# MAGIC On the other hand, decision trees also seemed theoretically promising. Compared to other algorithms desicion trees require less data preparation during pre-processing. It also doesn't require normalization or scaling and can handle null values gracefully. It is also easily interpretable. They require higher time to train the model. But based on the keypoints discussed able we picked the decision tree as our algorithm to move forward.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Dataset Preparation for Algorithm Exploration
 
 # COMMAND ----------
 
@@ -1051,10 +1073,17 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
 # COMMAND ----------
 
-# Model Evaluation
+# MAGIC  %md
+# MAGIC  ### Model Evaluation Function
 
+# COMMAND ----------
+
+# Model Evaluation
+# This function takes predictions dataframe and outcomeName and calculates the scores.
+# If the returnval is true it will return the values otherwise it will print it.
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 import pandas as pd
+
 # Evaluates model predictions for the provided predictions
 # Predictions must have two columns: prediction & label
 def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', ReturnVal=False):
@@ -1069,19 +1098,23 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', Ret
                      .toPandas() \
                      .assign(label = lambda df: df.metric.map({'1-1.0': 'TP', '1-0.0': 'FN', '0-0.0': 'TN', '0-1.0' : 'FP'})))
     metric = evaluation_df.set_index("label").to_dict()['count']
+    
     # Default missing metrics to 0
     for key in ['TP', 'TN', 'FP', 'FN']:
       metric[key] = metric.get(key, 0)
+      
 	# Compute metrics
     total = metric['TP'] + metric['FN'] + metric['TN'] + metric['FP']
     accuracy = 0 if (total == 0) else (metric['TP'] + metric['TN'])/total
     precision = 0 if ((metric['TP'] + metric['FP']) == 0) else metric['TP'] /(metric['TP'] + metric['FP'])
     recall = 0 if ((metric['TP'] + metric['FN']) == 0) else metric['TP'] /(metric['TP'] + metric['FN'])
     fscore = 0 if (precision+recall) == 0 else 2 * precision * recall /(precision+recall)
+    
     # Compute Area under ROC & PR Curve
     evaluator = BinaryClassificationEvaluator(rawPredictionCol="rawPrediction", labelCol=outcomeName)
     areaUnderROC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderROC"})
     areaUnderPRC = evaluator.evaluate(predict_df, {evaluator.metricName: "areaUnderPR"})
+    
     if ReturnVal : return {'Accuracy' : round(accuracy, 7), 
                            'Precision' : round(precision, 7), 
                            'Recall' : round(recall, 7), 
@@ -1089,21 +1122,31 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', Ret
                            'areaUnderROC' : round(areaUnderROC, 7), 
                            'AreaUnderPRC' : round(areaUnderPRC, 7),
                            'metric' : metric}
+    
     print("Accuracy = {}, Precision = {}, Recall = {}, f-score = {}, AreaUnderROC = {}, AreaUnderPRC = {}".format(
         round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPRC, 7))),
     print("\nConfusion Matrix:\n", pd.DataFrame.from_dict(metric, orient='index', columns=['count']), '\n')
 
+# This function takes a trained model and predicts outcome.
+# And calls model evaluation function
 def PredictAndEvaluate(model, data, dataName, outcomeName):
   predictions = model.transform(data)
   EvaluateModelPredictions(predictions, dataName, outcomeName)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Algorithm Exploration - Logistic Regression, Decision Tress, Naive Bayes & Support Vector Machines
+
+# COMMAND ----------
+
+# Train the model using the "train" dataset and test against the "val" dataset
 dataName = 'val'
 algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
   newnumFeatureNames = numFeatureNames + contNumFeatureNames
   titleName = dataName+ ' with ' + algorithm
+  # if svm the train_model need to apply one-hot encoding
   if algorithm == 'svm':
     tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=True)
     PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
@@ -1259,6 +1302,8 @@ display(toy_dataset)
 
 # COMMAND ----------
 
+from pyspark.ml.classification import DecisionTreeClassifier
+
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
 # Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
@@ -1271,16 +1316,19 @@ def PrepStringIndexer(stringfeatureNames):
 def PrepVectorAssembler(numericalFeatureNames, stringFeatureNames):
   return VectorAssembler(inputCols = numericalFeatureNames + [f + "_idx" for f in stringFeatureNames], outputCol = "features")
 
-# COMMAND ----------
-
-from pyspark.ml.classification import DecisionTreeClassifier
-
 def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins):
   # Train Model
   dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
   pipeline = Pipeline(stages = stages + [dt])
   dt_model = pipeline.fit(trainingData)
   return dt_model
+
+def TrainRandomForestModel(trainingData, stages, outcomeNames, maxDepth, maxBins, maxTrees):
+  # Train Model
+  rf = RandomForestClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins, maxTrees=maxTrees) 
+  pipeline = Pipeline(stages = stages + [rf])
+  rf_model = pipeline.fit(trainingData)
+  return rf_model
 
 import ast
 import random
@@ -1327,28 +1375,41 @@ def PrintDecisionTreeModel(model, featureNames):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Baseline Model: Predicting the Majority Class
+# MAGIC ### Training Decision Tree on Smoted (Balanced) Training Dataset
 
 # COMMAND ----------
 
-features_base = (numFeatureNames + binFeatureNames + orgFeatureNames, # numerical features
-                 catFeatureNames + intFeatureNames + holFeatureNames) # string features
-si_base = PrepStringIndexer(features_base[1])
-va_base = PrepVectorAssembler(numericalFeatureNames = features_base[0], stringFeatureNames = features_base[1])
+featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
+va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
+dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
+PrintDecisionTreeModel(dt_model.stages[-1], featureNames)
 
 # COMMAND ----------
 
-model_base = TrainDecisionTreeModel(train, si_base + [va_base], outcomeName, maxDepth=1, maxBins=6653)
-PrintDecisionTreeModel(model_base.stages[-1], features_base[0] + features_base[1])
-
-# COMMAND ----------
-
-PredictAndEvaluate(model_base, val, "val", outcomeName)
+PredictAndEvaluate(dt_model, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model, val, 'val', outcomeName)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### First Decision Tree with no fine-tuning/dataset balancing
+# MAGIC ### Training Random Forest on Smoted (Balanced) Training Dataset
+
+# COMMAND ----------
+
+featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
+va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
+rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, maxTrees=20)
+# show feature improtance for RF model
+
+# COMMAND ----------
+
+eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Training Ensemble with Smoted (Balanced) Training Dataset
 
 # COMMAND ----------
 
@@ -1357,7 +1418,7 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Ensemble training & Balancing dataset
+# MAGIC ### Training Ensemble with Majority Class Splitted (Balanced) Training Dataset
 
 # COMMAND ----------
 
@@ -1382,7 +1443,8 @@ PredictAndEvaluate(model_base, val, "val", outcomeName)
 
 def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
   target       = ["Dep_Del30"]
-  all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
+  #all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
+  all_features = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
   
   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
   ensemble_pipeline = Pipeline(stages=[assembler])
@@ -1407,6 +1469,12 @@ all_ensemble_features, ensemble_featureIndexer, ensemble_featureIndexer_smoted, 
 
 print(all_ensemble_features)
 ensemble_mini_train.show(2)
+
+# COMMAND ----------
+
+if False :
+  ensemble_val.write.mode('overwrite').format("parquet").save("dbfs:/user/team20/finalnotebook/ensemble_val.v1.parquet")
+  ensemble_test.write.mode('overwrite').format("parquet").save("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
 
 # COMMAND ----------
 
@@ -1508,7 +1576,7 @@ def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
 # The training is still done serially (code commented below) to avoid dabricks error.
 
 # Parallel training is not done in databricks environment.      
-# ensemble_model = TrainEnsembleModels_parallel(train_group, ensamble_featureIndexer, 
+# ensemble_model = TrainEnsembleModels_parallel(train_group, ensemble_featureIndexer, 
 #                     # Type of model we can use.
 #                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
 #                    )
@@ -1521,13 +1589,19 @@ def TrainEnsembleModels(en_train, featureIndexer, classifier) :
       model.append(Pipeline(stages=[featureIndexer, classifier]).fit(train))
   return model
       
-ensemble_model = TrainEnsembleModels(train_group, ensamble_featureIndexer, 
+ensemble_model = TrainEnsembleModels(train_group, ensemble_featureIndexer, 
                     # Type of model we can use.
                     #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=5, numTrees=5, impurity='gini')
                     #RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=6, numTrees=25, impurity='gini')
                     # Works best
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
                    )
+
+# COMMAND ----------
+
+if False : 
+  for i, model in enumerate(ensemble_model):
+    model.save("dbfs:/user/team20/finalnotebook/ensemble_model" + str(i) +  ".v1.model")
 
 # COMMAND ----------
 
@@ -1659,6 +1733,11 @@ ensemble_featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedF
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC Discussion for Logistic Regression Voting Model: Want to use L2 regularization, not L1 for the voting model. If we use L1, this will effectively zero-out some of the coefficients for some of the models in the ensemble, which will be same as removing entire subsets of the data, which is not something we want--in this case, it is better to use L2.
+
+# COMMAND ----------
+
 # Logistic Regression
 model_trained_ensemble_lr = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
               LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
@@ -1674,6 +1753,13 @@ model_trained_ensemble_svm = TrainCombiner(ensemble_transformed, ensemble_featur
 # Random forest
 model_trained_ensemble_rf = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
               RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
+
+# COMMAND ----------
+
+if False : 
+  model_trained_ensemble_lr.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr.v1.model")
+  model_trained_ensemble_svm.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm.v1.model")
+  model_trained_ensemble_rf.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf.v1.model")
 
 # COMMAND ----------
 
@@ -1765,6 +1851,12 @@ ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_feature
 
 # COMMAND ----------
 
+if False : 
+  for i, model in enumerate(ensemble_model_smoted):
+    model.save("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) +  ".v1.model")
+
+# COMMAND ----------
+
 # Construct a new data set based on the output of base classifiers
 ensemble_prediction_smoted = do_ensemble_prediction(ensemble_model_smoted, train_combiner_smoted)
 
@@ -1800,6 +1892,13 @@ model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, en
 
 # COMMAND ----------
 
+if False : 
+  model_trained_ensemble_lr_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v1.model")
+  model_trained_ensemble_svm_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm_smoted.v1.model")
+  model_trained_ensemble_rf_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf_smoted.v1.model")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Model evaluation
 # MAGIC 
@@ -1807,16 +1906,49 @@ model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, en
 
 # COMMAND ----------
 
+print("Loading model_trained_ensemble_lr_smoted.v1.model")
+model_trained_ensemble_lr_smoted_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v1.model")
+print("Loading model_trained_ensemble_svm_smoted.v1.model")
+model_trained_ensemble_svm_smoted_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm_smoted.v1.model")
+print("Loading model_trained_ensemble_rf_smoted.v1.model")
+model_trained_ensemble_rf_smoted_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf_smoted.v1.model")
+print("Loading model_trained_ensemble_lr.v1.model")
+model_trained_ensemble_lr_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr.v1.model")
+print("Loading model_trained_ensemble_svm.v1.model")
+model_trained_ensemble_svm_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm.v1.model")
+print("Loading model_trained_ensemble_rf.v1.model")
+model_trained_ensemble_rf_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf.v1.model")
+
+# COMMAND ----------
+
+ensemble_model_load = []
+for i in range(0,9) :
+  print("Loading ensemble_model " + str(i))
+  ensemble_model_load.append(pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/ensemble_model" + str(i) + ".v1.model"))
+
+# COMMAND ----------
+
+ensemble_model_smoted_load = []
+for i in range(0,9) :
+  print("Loading ensemble_model " + str(i))
+  ensemble_model_smoted_load.append(pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) + ".v1.model"))
+
+# COMMAND ----------
+
+print("Loading ensemble_test.v1.parquet")
+ensemble_test_load = spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
+print("Loading ensemble_val.v1.parquet")
+ensemble_val_load = spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/ensemble_val.v1.parquet")
+
+# COMMAND ----------
+
 model_eval_smoted = []
 for (l2_name, l2_model, l1_model)  in [
-  ("LR-smoted", model_trained_ensemble_lr_smoted, ensemble_model_smoted), 
-  ("SVM-smoted", model_trained_ensemble_svm_smoted, ensemble_model_smoted), 
-  ("RF-smoted", model_trained_ensemble_rf_smoted, ensemble_model_smoted),
-#   ("LR", model_trained_ensemble_lr, ensemble_model), 
-#   ("SVM", model_trained_ensemble_svm, ensemble_model), 
-#   ("RF", model_trained_ensemble_rf, ensemble_model)
+  ("LR-smoted", model_trained_ensemble_lr_smoted_load, ensemble_model_smoted_load), 
+  ("SVM-smoted", model_trained_ensemble_svm_smoted_load, ensemble_model_smoted_load), 
+  ("RF-smoted", model_trained_ensemble_rf_smoted_load, ensemble_model_smoted_load),
 ] :
-  for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
+  for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
       ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
       eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
@@ -1824,25 +1956,7 @@ for (l2_name, l2_model, l1_model)  in [
 
 # COMMAND ----------
 
-model_eval_regular = []
-for (l2_name, l2_model, l1_model)  in [
-#   ("LR-smoted", model_trained_ensemble_lr_smoted, ensemble_model_smoted), 
-#   ("SVM-smoted", model_trained_ensemble_svm_smoted, ensemble_model_smoted), 
-#   ("RF-smoted", model_trained_ensemble_rf_smoted, ensemble_model_smoted),
-  ("LR", model_trained_ensemble_lr, ensemble_model), 
-  ("SVM", model_trained_ensemble_svm, ensemble_model), 
-  ("RF", model_trained_ensemble_rf, ensemble_model),
-] :
-  for data_name, data in [("test set", ensemble_test), ("validation", ensemble_val)] :
-      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
-      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
-      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
-      model_eval_regular.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
-      
-
-# COMMAND ----------
-
-model_eval = model_eval_smoted + model_eval_regular
+model_eval = model_eval_smoted
 headerColor  = 'lightgrey'
 rowEvenColor = 'lightgrey'
 rowOddColor  = 'white'
@@ -1875,7 +1989,60 @@ fig = go.Figure(data=[go.Table(
     font = dict(color = 'darkslategray', size = 13)
     ))
 ])
-fig.update_layout(width=1400, height=600, title="Model evaluation results")
+fig.update_layout(width=1400, height=600, title="Model evaluation results (smoted)")
+fig.show()
+
+# COMMAND ----------
+
+model_eval_regular = []
+for (l2_name, l2_model, l1_model)  in [
+  ("LR", model_trained_ensemble_lr_load, ensemble_model_load), 
+  ("SVM", model_trained_ensemble_svm_load, ensemble_model_load), 
+  ("RF", model_trained_ensemble_rf_load, ensemble_model_load),
+] :
+  for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
+      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+      model_eval_regular.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
+      
+
+# COMMAND ----------
+
+model_eval = model_eval_regular
+headerColor  = 'lightgrey'
+rowEvenColor = 'lightgrey'
+rowOddColor  = 'white'
+
+fig = go.Figure(data=[go.Table(
+  header=dict(
+    values=['<b>Run type</b>','<b>Accuracy</b>','<b>Precision</b>','<b>Recall</b>','<b>f-score</b>', 
+            '<b>AUROC</b>', '<b>AUPRC</b>', '<b>TP</b>', '<b>TN</b>', '<b>FP</b>', '<b>FN</b>'],
+    line_color='darkslategray',
+    fill_color=headerColor,
+    align=['left','center'],
+    font=dict(color='black', size=13)
+  ),
+  cells=dict(
+    values=[
+      [ev['l2_name'] + '<br>(' + ev['data_name'] + ')' for ev in model_eval],
+      [ev['result']['Accuracy'] for ev in model_eval],
+      [ev['result']['Precision'] for ev in model_eval],
+      [ev['result']['Recall'] for ev in model_eval],
+      [ev['result']['f-score'] for ev in model_eval],
+      [ev['result']['areaUnderROC'] for ev in model_eval],
+      [ev['result']['AreaUnderPRC'] for ev in model_eval],
+      [ev['result']['metric']['TP'] for ev in model_eval],
+      [ev['result']['metric']['TN'] for ev in model_eval],
+      [ev['result']['metric']['FP'] for ev in model_eval],
+      [ev['result']['metric']['FN'] for ev in model_eval],
+    ],
+    line_color='darkslategray',
+    align = ['left'],
+    font = dict(color = 'darkslategray', size = 13)
+    ))
+])
+fig.update_layout(width=1400, height=600, title="Model evaluation results (Not smoted)")
 fig.show()
 
 # COMMAND ----------
@@ -1897,6 +2064,10 @@ fig.show()
 # MAGIC - Scalability & sampling (for SMOTE)
 # MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
+
+# COMMAND ----------
+
+all_ensemble_features
 
 # COMMAND ----------
 
