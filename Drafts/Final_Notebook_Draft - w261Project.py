@@ -970,40 +970,6 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_km
 
 # COMMAND ----------
 
-# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
-# Read prepared data from parquet for training
-def ReadDataFromParquet(dataName):
-  # Read data back directly from disk 
-  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
-
-airlines = ReadDataFromParquet('augmented')
-mini_train = ReadDataFromParquet('augmented_mini_train')
-train = ReadDataFromParquet('augmented_train')
-val = ReadDataFromParquet('augmented_val')
-test = ReadDataFromParquet('augmented_test')
-train_smoted = ReadDataFromParquet('augmented_smoted_train_kmeans')
-
-###########################################
-# Define all variables for easy reference #
-###########################################
-
-# Numerical Variables to use for training
-outcomeName = 'Dep_Del30'
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] ##
-contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
-catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
-binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin'] ##
-intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
-holFeatureNames = ['Holiday']
-orgFeatureNames = ['Origin_Activity'] ##
-briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman'] ##
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## IV. Algorithm Exploration
 # MAGIC - Apply 2-3 Algorithms
@@ -1213,6 +1179,36 @@ for algorithm in algorithms:
 
 # COMMAND ----------
 
+# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
+# Read prepared data from parquet for training
+def ReadDataFromParquet(dataName):
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
+airlines = ReadDataFromParquet('augmented')
+mini_train = ReadDataFromParquet('augmented_mini_train')
+train = ReadDataFromParquet('augmented_train')
+val = ReadDataFromParquet('augmented_val')
+test = ReadDataFromParquet('augmented_test')
+train_smoted = ReadDataFromParquet('augmented_smoted_train_kmeans')
+
+###########################################
+# Define all variables for easy reference #
+###########################################
+
+# Numerical Variables to use for training
+outcomeName = 'Dep_Del30'
+numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group'] ##
+contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
+catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
+binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin'] ##
+intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
+holFeatureNames = ['Holiday']
+orgFeatureNames = ['Origin_Activity'] ##
+briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman'] ##
+
+# COMMAND ----------
+
 ##################
 ## START HERE!! ##
 ##################
@@ -1242,25 +1238,13 @@ outcomeName = 'Dep_Del30'
 
 # MAGIC %md
 # MAGIC ### Toy Example: Decision Trees
+# MAGIC Given that in the previous section, we decided on Decision Trees as our algorithm of choice, we will now proceed to describe the math behind the algorithm with our toy example.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ##### Dataset
-
-# COMMAND ----------
-
-## Build the toy example dataset from the cleaned and transformed mini training set
-# toy_dataset = mini_train.select(['Dep_Del30', 'Day_Of_Week', 'Origin', 'Op_Unique_Carrier']) \
-#                         .filter(mini_train['Dep_Del30'] == 0) \
-#                         .sample(False, 0.0039, 8)
-
-# toy_dataset = toy_dataset.union(mini_train.select(['Dep_Del30', 'Day_Of_Week', 'Origin', 'Op_Unique_Carrier']) \
-#                          .filter(mini_train['Dep_Del30'] == 1) \
-#                          .sample(False, 0.025, 8))
-
-## Save the toy example dataset
-# toy_dataset = WriteAndRefDataToParquet(toy_dataset, 'toy_dataset')
+# MAGIC For the toy example, we will leverage a toy dataset for motivating the algorithm explanation, which consists of a 9 records from the original *Airline Delays* dataset and includes our outcome variable `Dep_Del30`, 2 numerical features `Day_Of_Week` and `CRS_Dep_Time`, as well as 2 categorical features `Origin` and `Op_Unique_Carrier`. These are displayed below:
 
 # COMMAND ----------
 
@@ -1465,7 +1449,7 @@ eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, Re
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC Ensamble approach can be used to address the imbalanced training data problem. The approaches such as SMORT has scalability issues and ensamble approach try to overcome practical issues. The negative effects of imbalance can be avoided with out replicating the minority class and with out discarding information from majority class. In this approach, individual components of the ensemble with a balanced learning sample. Working in this way, it is possible to appropriately handle the difficulties of the imbalance, while avoiding the drawbacks inherent to the oversampling and undersampling techniques.
+# MAGIC Ensemble approach can be used to address the imbalanced training data problem. The approaches such as SMOTE has scalability issues and ensemble approach try to overcome practical issues. The negative effects of imbalance can be avoided with out replicating the minority class and with out discarding information from majority class. In this approach, individual components of the ensemble with a balanced learning sample. Working in this way, it is possible to appropriately handle the difficulties of the imbalance, while avoiding the drawbacks inherent to the oversampling and undersampling techniques.
 # MAGIC 
 # MAGIC Stacking is a general framework that involves training a learning algorithm to combine the predictions of several other learning algorithms to make a final prediction. Stacking can be used to handle an imbalanced dataset. The steps can be outlined as below.  
 # MAGIC (a) Group the **training** data into majority and minority class.   
