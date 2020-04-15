@@ -1328,7 +1328,8 @@ display(toy_dataset)
 
 # COMMAND ----------
 
-mfrom pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.classification import RandomForestClassifier
 
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
@@ -1402,19 +1403,76 @@ def PrintDecisionTreeModel(model, featureNames):
 
 # MAGIC %md
 # MAGIC ### Training Decision Tree on Smoted (Balanced) Training Dataset
+# MAGIC 
+# MAGIC Decision trees are a very popular approach to prediction problems. They can be trained from both categorical and numerical features, to perform classification.
 
 # COMMAND ----------
 
 featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
 va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
-dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
-PrintDecisionTreeModel(dt_model.stages[-1], featureNames)
 
 # COMMAND ----------
 
-PredictAndEvaluate(dt_model, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model, val, 'val', outcomeName)
+# maxDepth = None
+dt_model_0 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=None, maxBins=200)
+PredictAndEvaluate(dt_model_0, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_0, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_0, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_0.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 10
+dt_model_1 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
+PredictAndEvaluate(dt_model_1, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_1, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_1, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_1.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 15
+dt_model_2 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=15, maxBins=200)
+PredictAndEvaluate(dt_model_2, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_2, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_2, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_2.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 20
+dt_model_3 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
+PredictAndEvaluate(dt_model_3, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_3, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_3, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_3.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 30
+dt_model_4 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
+PredictAndEvaluate(dt_model_4, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_4, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_4, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_4.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 50
+dt_model_5 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
+PredictAndEvaluate(dt_model_5, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_5, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_5, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_5.stages[-1], featureNames)
+
+# COMMAND ----------
+
+# maxDepth = 100
+dt_model_6 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
+PredictAndEvaluate(dt_model_6, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model_6, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model_6, val, 'val', outcomeName)
+PrintDecisionTreeModel(dt_model_6.stages[-1], featureNames)
 
 # COMMAND ----------
 
@@ -2201,17 +2259,21 @@ fig.show()
 
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
-# MAGIC - bias-variance tradeoff (in dataset balancing discussion)        
+# MAGIC - Bias-variance tradeoff (in dataset balancing discussion)        
 # MAGIC   Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. (Did we do this or was it future?)
 # MAGIC        
 # MAGIC - Breiman's Theorem (for ordering categorical variables)           
-# MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*
+# MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*. For example, if you consider the feature *Op_Unique_Carrier* it had 9 unique categories. Using Breiman's method the potential 512 splits were reduced to 8 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like *Origin-Dest* and *Day_Of_Year* where the number of categories were much larger.
 # MAGIC 
 # MAGIC - how data is stored on cluster - parquet
 # MAGIC   The original airlines dataset has roughly 31 million records and 54 fields.  While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format in originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman..etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
 # MAGIC 
 # MAGIC - Scalability & sampling (for SMOTE)
+# MAGIC 
+# MAGIC 
 # MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
+# MAGIC   Broadcast variables allow the programmer to keep a read-only variable cached on each machine rather than shipping a copy of it with tasks. In this project we needed to join tables in multiple cases. By using the Broadcast variable, we implemented a map-side join, which is much faster than reduce side join, as there is no shuffle-which is more expensive.  “Brodcast +  sidejoin” were used to implement the addition of holiday feature, Aggregated Origin-Activity, Breiman ranks and to create a balanced airline dataset using SMOTE .
+# MAGIC 
 # MAGIC 
 # MAGIC - 1-hot encoding for SVM's?        
 # MAGIC   While using Support Vector Machines classifier, it had to deal with categorical features. There were two ways we could have accomplished this. First way is the use of integer codes which assumes that there is a certain order/ranking for these categorical features. And the second way is using one-hot encoding. One hot encoding is used when the categorical features don't have any particular order. In our case, the selected categorical features themselves didn't have any natural ordering so we adopted to one hot-encoding.
