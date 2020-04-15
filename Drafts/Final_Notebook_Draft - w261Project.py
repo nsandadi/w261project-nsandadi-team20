@@ -641,7 +641,7 @@ display(airlines.select('Year', 'Month', 'Day_Of_Month', 'CRS_Dep_Time_bin', 'Or
 # MAGIC %md
 # MAGIC As discussed in the previous secition in EDA task #2, in our original *Airline Delays* dataset, we have three categorical features to consider, and with the addition of our interaction terms and our holiday feature, we have a total of 8 categorical features to consider for training our model. While some of these categorical features have few distinct values, some of them, especially our interaction terms like `Origin_Dest`, can have a very large number of distinct values. Depending on the model we choose following our algorithm exploration section, these large number of distinct values can be cause for concern with respect to the scalability of our algoirthms. For SVMs, this can lead to very large one-hot encoded vectors. For Logistic Regression, this can lead to many (if not too many) unique coefficients to estimate. And with Decision Trees, too many categories can lead to an inordinate number of possible splits for the algorithm to consider and finding the "best" split would be computationally prohibitive.
 # MAGIC 
-# MAGIC However, as we saw in our EDA task, we do have a way of ordering the categories in each categorical feature in a more meaningful way by applying Breiman's Theorem to each of our categorical features. Let's consider again one of our original categorical features `Op_Unique_Carrier` that we'd explored in EDA task #2. The cateogries by themselves, do not have any implicit ordering. Yet, uing these distinct categories, we can develop aggregated statistics on the outcome variable `Dep_Del30` to understand how some categories compare to others and rank them--this is the idea behind Breiman's Theorem. Below, we define a function for generating such "Breiman Ranks" given a training dataset, with the example shown for the `Op_Unique_Carrier` feature.
+# MAGIC However, as we saw in our EDA task, we do have a way of ordering the categories in each categorical feature in a more meaningful way by applying Breiman's Theorem to each of our categorical features. Let's consider again one of our original categorical features `Op_Unique_Carrier` that we'd explored in EDA task #2. The cateogries by themselves, do not have any implicit ordering. Yet, using these distinct categories, we can develop aggregated statistics on the outcome variable `Dep_Del30` to understand how some categories compare to others and rank them--this is the idea behind Breiman's Theorem. Below, we define a function for generating such "Breiman Ranks" given a training dataset, with the example shown for the `Op_Unique_Carrier` feature.
 
 # COMMAND ----------
 
@@ -752,10 +752,10 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC 
 # MAGIC Under-sampling of the majority class or/and over-sampling of the minority class have been proposed as a good means of increasing the sensitivity of a classifier to the minority class. However, under-sampling the majority class samples could potentially lead to loss of important information. Also, over-sampling the minority class could lead to overfitting. The reason is fairly straightforward. Consider the effect on the decision regions in feature space when minority over-sampling is done by replication (sampling with replacement). With replication, the decision region that results in a classification decision for the minority class can actually become smaller and more specific as the minority samples in the region are replicated. This is the opposite of the desired effect. 
 # MAGIC 
-# MAGIC SMOTE provides a new approach to over-sampling. It is an over-sampling approach in which the minority class is over-sampled by creating “synthetic” examples rather than by over-sampling with replacement. This approach is inspired by a technique that proved successful in handwritten character recognition (Ha & Bunke, 1997). They created extra training data by performing certain operations on real data. In their case, operations like rotation and skew were natural ways to perturb the training data. SMOTe generates synthetic examples in a less application-specific manner, by operating in “feature space” rather than “data space”. The minority class is over-sampled by taking each minority class sample and introducing synthetic examples along the line segments joining the k nearest neighbors. Our implementation currently uses seven nearest neighbors.
+# MAGIC SMOTE provides a new approach to over-sampling. It is an approach in which the minority class is over-sampled by creating “synthetic” examples rather than by over-sampling with replacement. This approach is inspired by a technique that proved successful in handwritten character recognition (Ha & Bunke, 1997). They created extra training data by performing certain operations on real data. In their case, operations like rotation and skew were natural ways to perturb the training data. SMOTe generates synthetic examples in a less application-specific manner, by operating in “feature space” rather than “data space”. The minority class is over-sampled by taking each minority class sample and introducing synthetic examples along the line segments joining the k nearest neighbors. Our implementation currently uses seven nearest neighbors.
 # MAGIC 
 # MAGIC Synthetic samples are generated in the following way: 
-# MAGIC - Take the difference between the feature vector (of the sample) under consideration and the feature vector of its nearest neighbor. 
+# MAGIC - Take the difference between the feature vector (of the sample) under consideration and the feature vector of its nearest neighbor(s). 
 # MAGIC - Multiply this difference by a random number between 0 and 1 to scale the difference.
 # MAGIC - Add the scaled difference to the feature vector under consideration. 
 # MAGIC 
@@ -786,7 +786,7 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC   
 # MAGIC   > ii. Create clusters of minority sample data using K-means algorithm, run KNN on each cluster in parallel and generate synthetic data for each cluster. This approach uses the entire training data. We split the data into 1000 clusters.
 # MAGIC 
-# MAGIC   > Out of the above two approaches, we found the second approach took less time to run. Also, when we compared the distribution of minority samples from the original training set vs. all the minority samples after applying SMOTE, the data generated by the second approach matched the original feature distributions of the training set better than the data generated by the first approach. Thus for the remainder of this analysis, we will proceed with the second approach for balancing our dataset using SMOTE. 
+# MAGIC   > Out of the above two approaches, we found the second approach took far less time to run (~2.5 hrs vs. 24+ hrs). Also, when we compared the distribution of minority samples from the original training set to all the minority samples after applying SMOTE, the data generated by the second approach matched the original feature distributions of the training set better than the data generated by the first approach. Thus, for the remainder of this analysis, we will proceed with the second approach for balancing our dataset using SMOTE. 
 # MAGIC 
 # MAGIC We have provided an additional notebook with the full implementation of SMOTE for this project, which can be found here:
 # MAGIC 
@@ -936,7 +936,7 @@ def ApplyFeatureEngineeringToSmotedTrainingData(df, breimanRanksDict):
   featuresToApplyBreimanRanks = catFeatureNames + intFeatureNames + holFeatureNames
   for feature in featuresToApplyBreimanRanks:
     # Apply Breiman's method & do feature transformation for all datasets
-    df = ApplyBreimansMethod(df, breimanRanksDict[feature], feature, outcomeName)
+    df = ApplyBreimansTheorem(df, breimanRanksDict[feature], feature, outcomeName)
     
   return df
 
@@ -966,7 +966,7 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_km
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC In the case of the training dataset for the *Airline Delays*, we have a ratio of 7:1 for the majority and minority class, which will generate 7 subsets of data using the majority splitting technique. While this is a possible dataset balance approach for us to use in model training, this approach is best-suited for ensemble approaches, where each model in the ensemble is assigned one balanced subset of data for training. With this approach, each model in the ensemble will have a balanced dataset to learn from, reducing bias in the indiviual models, but no majority class data is lost as would be the case for traditional undersampling techniques. We will explore the use of majority class splitting when we explore ensemble approaches to predictin departure dleays in section V of the report. 
+# MAGIC In the case of the training dataset for the *Airline Delays*, we have a ratio of 7:1 for the majority and minority class, which will generate 7 subsets of data using the majority splitting technique. While this is a possible dataset balance approach for us to use in model training, this approach is best-suited for ensemble approaches, where each model in the ensemble is assigned one balanced subset of data for training. With this approach, each model in the ensemble will have a balanced dataset to learn from, reducing bias in the indiviual models, but no majority class data is lost as would be the case for traditional undersampling techniques. We will explore the use of majority class splitting when we explore ensemble approaches to predicting departure dleays in section V of the report. 
 
 # COMMAND ----------
 
@@ -1328,7 +1328,7 @@ display(toy_dataset)
 
 # COMMAND ----------
 
-from pyspark.ml.classification import DecisionTreeClassifier
+mfrom pyspark.ml.classification import DecisionTreeClassifier
 
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
@@ -1349,9 +1349,9 @@ def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins)
   dt_model = pipeline.fit(trainingData)
   return dt_model
 
-def TrainRandomForestModel(trainingData, stages, outcomeNames, maxDepth, maxBins, maxTrees):
+def TrainRandomForestModel(trainingData, stages, outcomeNames, maxDepth, maxBins, numTrees):
   # Train Model
-  rf = RandomForestClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins, maxTrees=maxTrees) 
+  rf = RandomForestClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins, numTrees=numTrees) 
   pipeline = Pipeline(stages = stages + [rf])
   rf_model = pipeline.fit(trainingData)
   return rf_model
@@ -1425,12 +1425,12 @@ PredictAndEvaluate(dt_model, val, 'val', outcomeName)
 
 featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
 va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
-rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, maxTrees=20)
+rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, numTrees=20)
 # show feature improtance for RF model
 
 # COMMAND ----------
 
-eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+# eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
 
 # COMMAND ----------
 
@@ -2202,21 +2202,23 @@ fig.show()
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
 # MAGIC - bias-variance tradeoff (in dataset balancing discussion)        
-# MAGIC   During algorithm performance evaluation of Decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To overcome the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance.       
+# MAGIC   Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. (Did we do this or was it future?)
+# MAGIC        
+# MAGIC - Breiman's Theorem (for ordering categorical variables)           
+# MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*
+# MAGIC 
+# MAGIC - how data is stored on cluster - parquet
+# MAGIC   The original airlines dataset has roughly 31 million records and 54 fields.  While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format in originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman..etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
+# MAGIC 
+# MAGIC - Scalability & sampling (for SMOTE)
+# MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC 
 # MAGIC - 1-hot encoding for SVM's?        
-# MAGIC   While using Support Vector Machines classifier, it had to deal with categorical features that didn’t necessarily have an ordering. In such cases instead of converting them to integer codes, we used one hot-encoding.
+# MAGIC   While using Support Vector Machines classifier, it had to deal with categorical features. There were two ways we could have accomplished this. First way is the use of integer codes which assumes that there is a certain order/ranking for these categorical features. And the second way is using one-hot encoding. One hot encoding is used when the categorical features don't have any particular order. In our case, the selected categorical features themselves didn't have any natural ordering so we adopted to one hot-encoding.
 # MAGIC   
 # MAGIC - assumptions (for different algorithms - for example OLS vs Trees)        
 # MAGIC   During algorithm exploration we selected a set of variety of algorithms to pick the most suitable one for this particular airline dataset. The algorithms like logistic regression and Naive Bayes tend me very simple in its modeling. These simple models relatively insensitive to variance to different training datasets. But they tend to be highly biased. This problem seem to compound when the data is imbalanced. Algorithms like decision trees and support vector machines are much more complex and as we increase complexity they tend to less and less biased but has a tendency to show a lot of variance between training sets. In other words they seem to overfit to the given training set. In our case we chose the complex model which overfits and used additional methods like random forest, ensembles and hyper paramter tuning to reduce the overfitting of the model.
 # MAGIC   
-# MAGIC - Breiman's Theorem (for ordering categorical variables)           
-# MAGIC   We applied Breiman's Method to some of the categorical features to generate a ranking of within each categorical feature and ordered the categories based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features.
-# MAGIC 
-# MAGIC 
-# MAGIC - how data is stored on cluster - parquet
-# MAGIC - Scalability & sampling (for SMOTE)
-# MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
 
 # COMMAND ----------
