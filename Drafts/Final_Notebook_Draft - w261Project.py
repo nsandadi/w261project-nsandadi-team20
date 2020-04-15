@@ -26,9 +26,10 @@ from pyspark.sql.functions import col
 from pyspark.sql.functions import when
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DateType
 from pyspark.sql.functions import udf
+from pyspark.sql import Window
 
-from pyspark.ml import Pipeline
 import pyspark.ml.pipeline as pl
+from pyspark.ml import Pipeline
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.classification import DecisionTreeClassifier
 from pyspark.ml.classification import NaiveBayes
@@ -38,6 +39,10 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.feature import Bucketizer, StringIndexer, VectorIndexer, VectorAssembler, OneHotEncoderEstimator
 
 from pyspark.mllib.evaluation import MulticlassMetrics
+
+from dateutil.relativedelta import relativedelta, SU, MO, TU, WE, TH, FR, SA
+import pandas as pd
+import datetime as dt
 
 # COMMAND ----------
 
@@ -396,8 +401,16 @@ GetStats(train_and_val)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC The only odd value seems to be the minimum value for `CRS_Elapsed_Time` that takes on a value of -99.0. Upon closer inspection, there's no true indication for why this datapoint is negative, except that it is likely a mistake in the dataset, since the difference in the departure and arrival times is 76 minutes. Given that this is just one data point and we have nearly 24 million data points, we will defer updating this as it should not have a huge impact on our training results.
-# MAGIC 
+# MAGIC The only odd value seems to be the minimum value for `CRS_Elapsed_Time` that takes on a value of -99.0. Upon closer inspection, there's no true indication for why this datapoint is negative, except that it is likely a mistake in the dataset, since the difference in the departure and arrival times is 76 minutes, which should be the actual value of `CRS_Elapsed_Time`. For this reason, we will correct the `CRS_Elapsed_Time` for this flight record.
+
+# COMMAND ----------
+
+# Correct CRS_ElapsedTime = -99
+airlines = airlines.withColumn("CRS_Elapsed_Time", when(train_and_val["CRS_Elapsed_Time"] == -99, 76.0).otherwise(train_and_val["CRS_Elapsed_Time"]))
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC Finally, note that we do not appear to have any null values in our training and validation data and thus we will not need to handle missing values for the purpose of training. However, there is a potential that our test data has missing values and or the features of the test data take on values that were not seen in the training data. Because this is always a possibility at inference time, we will need to make sure our data transformations are robust to such cases--we will evaluate this on a case-by-case basis.
 
 # COMMAND ----------
@@ -479,7 +492,7 @@ display(d)
 # MAGIC %md
 # MAGIC Along a similar vein of thinking, we decided to add the interaction of `CRS_Dep_Time` and `Day_Of_Week` along with the interaction of `CRS_Arr_Time` and `Day_Of_Week` to produce `Dep_Time_Of_Week` and `Arr_Time_Of_Week` respectively. We discovered that there are certain times of day that encounter a higher likelihood of departure delays, depending on the day of the week these times fall on. But to ensure there are not too many categories in this new categorical feature, we will interact the binned times with the `Day_Of_Week` for each interaction.
 # MAGIC 
-# MAGIC Finally, we considered that there may be some inherent relationship between the origin airport and the destination airport with respect to departure delays that may be well captured via an interaction between the two variables. Namely, during our EDA, we saw that more popular flights (such as between SFO (San Francisco) and LAX (Los Angeles)) also saw higher levels of departure delays, whereas less popular flights (such as between SEA (Seattle) and PHX (Pheonix)) saw lower levels of departure delays. Thus, we chose to interact `Origin` and `Dest` to form the categorical feature `Origin-Dest` for our dataset. All the interactions discussed are added using the provided code and a few examples are shown below:
+# MAGIC Finally, we considered that there may be some inherent relationship between the origin airport and the destination airport with respect to departure delays that may be well captured via an interaction between the two features. Namely, during our EDA, we saw that more popular flights (such as between SFO (San Francisco) and LAX (Los Angeles)) also saw higher levels of departure delays, whereas less popular flights (such as between SEA (Seattle) and PHX (Pheonix)) saw lower levels of departure delays. Thus, we chose to interact `Origin` and `Dest` to form the categorical feature `Origin_Dest` for our dataset. All the interactions discussed are added using the provided code and a few examples are shown below:
 
 # COMMAND ----------
 
@@ -510,16 +523,12 @@ display(airlines.select(['Month', 'Day_Of_Month', 'Day_Of_Year', 'Day_Of_Week', 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Add Holidays Feature
-# MAGIC With the `Day_Of_Year` variable in mind, we'd noted during the EDA that the likelihood of a departure delay, as well as the number of flights occuring on a given day of the year seemed to have some relationship with the commonly celebrated holidays in the United States. Take Christmas Day, which always falls on December 25th. If we examine the plot shown previously, there was generally a lower probability of delay on Christmas Day and Christmas Eve, with higher probabilities immediately before and after those two days. Intuitively, one would expect a higher probability of departure delay as people try to get home for the holidays or leave promptly after the holidays are over but on the day of holidays, people generally stay home. There are a variety of cases where holidays and days near holidays seem to reflect something about the likelihood of a flight experiencing a departure delay. 
+# MAGIC ### Adding a Holiday Feature
+# MAGIC With the `Day_Of_Year` variable in mind, we'd noted during the EDA that the likelihood of a departure delay, as well as the number of flights occuring on a given day of the year seemed to have some relationship with the commonly celebrated holidays in the United States. Take Christmas Day, which always falls on December 25th. If we examine the plot shown previously, there generally appeared to be a lower probability of delay on Christmas Day and Christmas Eve, with higher probabilities immediately before and after those two days. Intuitively, one would expect a higher probability of departure delay as people try to get home for the holidays or leave promptly after the holidays are over; but on the day of holidays, people generally stay home (and thus experience less probability of departure delay). 
 # MAGIC 
-# MAGIC For this reason, we attempted to capture this information by joining a dataset of government holidays to our original *Airlines Delays* dataset and construct the `Holiday` feature. This feature is a categorical feature
+# MAGIC There are a variety of cases where holidays and days near holidays seem to reflect something about the likelihood of a flight experiencing a departure delay. For this reason, we attempted to capture this information by joining a dataset of government holidays to our original *Airlines Delays* dataset and construct the `Holiday` feature. This feature is a categorical feature indicating whether a flight occurs before, after, or on a holiday, or is not in any way related to a holiday. Because the *Holidays* dataset is much smaller compared to the *Airline Delays* dataset and will fit in memory, we will join this dataset to *Airline Delays* via a broadcast join after it has been prepared with before and after limits for specific government holidays. Note that the limits for whether a flight occurs before or after a holiday is dependent on the day of the week in addition to government holidays that are near the flight date. This feature construction is done in the following code with a few examples shown below with new feature:
 
 # COMMAND ----------
-
-from dateutil.relativedelta import relativedelta, SU, MO, TU, WE, TH, FR, SA
-import pandas as pd
-import datetime as dt
 
 def AddHolidayFeature(df):
   if ('Holiday' in df.columns):
@@ -530,6 +539,9 @@ def AddHolidayFeature(df):
   holiday_df_raw = spark.read.csv("dbfs:/user/shajikk@ischool.berkeley.edu/scratch/" + 'holidays.csv').toPandas()
   holiday_df_raw.columns = ['ID', 'FL_DATE', 'Holiday']
 
+  # Get limits for a given date when we'll likely see "near holiday" conditions hold
+  # This is more ofr the purpose of helping to capture likely long-weekend conditions
+  # that could influence departure delays near holidays
   def get_limits(date):
     given_date = dt.datetime.strptime(date,'%Y-%m-%d')
     this_day = given_date.strftime('%a')
@@ -557,8 +569,10 @@ def AddHolidayFeature(df):
     if this_day == 'Fri' : prev, nxt = lastThu, thisMon
     if this_day == 'Sat' : prev, nxt = lastFri, thisMon
 
-    return prev.strftime("%Y-%m-%d"), prev.strftime('%a'),  nxt.strftime("%Y-%m-%d"), nxt.strftime('%a')
+    return prev.strftime("%Y-%m-%d"), prev.strftime('%a'), nxt.strftime("%Y-%m-%d"), nxt.strftime('%a')
 
+  # Construct a holiday dataframe for days that fall before, after, or on a holiday
+  # Consider holidays for all years 2015-2019 individually
   holiday_df = pd.DataFrame()
   for index, row in holiday_df_raw.iterrows():
       prev, prev_day, nxt, nxt_day = get_limits(row['FL_DATE'])
@@ -584,12 +598,13 @@ def AddHolidayFeature(df):
 # Note that holidays are known well in advance of a flight and are not specific to the training dataset
 holFeatureNames = ['Holiday']
 airlines = AddHolidayFeature(airlines)
-display(airlines.take(1000))
+display(airlines.select('Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Holiday').sample(fraction=0.0001, seed=9).sample(fraction=0.01, seed=6).take(10))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Add Origin Activity Feature
+# MAGIC ### Adding an Origin Activity Feature
+# MAGIC Another intuition based feature that we believed would affect the likelihood of departure delay would be the amount of airline traffic an airport was experiencing around the time that departure was scheduled. Given that busier airports are likely to have busier air traffic control towers and more planes lined up to depart (not to mention more traffic inside of the airport itself as people try to get to their flights), it seemed likely that the amount of activity happening at the origin airport would be indicative of the likelihood of a departure delay. With the `Origin_Activity` feature, we attempt to define a numerical metric that aggregates the "amount of traffic" occuring at a given airport during a specific scheduled departure time block on a given day of the year. This aggregated dataset can then be joined back to the *Airline Delays* dataset via a broadcast join, which gives each flight record a count of the scheduled flight activity that would be occuring in the same departure time block and origin airport. This feature is generated below and a few examples are displayed below:
 
 # COMMAND ----------
 
@@ -614,24 +629,23 @@ def AddOriginActivityFeature(df):
 # Note that the scheduled origin activity is known well in advance of a flight and is not specific to the training dataset
 orgFeatureNames = ['Origin_Activity']
 airlines = AddOriginActivityFeature(airlines)
-display(airlines.take(1000))
+display(airlines.select('Year', 'Month', 'Day_Of_Month', 'CRS_Dep_Time_bin', 'Origin', 'Origin_Activity').sample(fraction=0.0001, seed=7).take(6))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Apply Breiman's Theorem to Categorical Features
+# MAGIC ### Applying Breiman's Theorem to Categorical Features
 
 # COMMAND ----------
 
-# Regenerate splits for Breiman ranking prep
-mini_train, train, val, test = SplitDataset(airlines)
+# MAGIC %md
+# MAGIC As discussed in the previous secition in EDA task #2, in our original *Airline Delays* dataset, we have three categorical features to consider, and with the addition of our interaction terms and our holiday feature, we have a total of 8 categorical features to consider for training our model. While some of these categorical features have few distinct values, some of them, especially our interaction terms like `Origin_Dest`, can have a very large number of distinct values. Depending on the model we choose following our algorithm exploration section, these large number of distinct values can be cause for concern with respect to the scalability of our algoirthms. For SVMs, this can lead to very large one-hot encoded vectors. For Logistic Regression, this can lead to many (if not too many) unique coefficients to estimate. And with Decision Trees, too many categories can lead to an inordinate number of possible splits for the algorithm to consider and finding the "best" split would be computationally prohibitive.
+# MAGIC 
+# MAGIC However, as we saw in our EDA task, we do have a way of ordering the categories in each categorical feature in a more meaningful way by applying Breiman's Theorem to each of our categorical features. Let's consider again one of our original categorical features `Op_Unique_Carrier` that we'd explored in EDA task #2. The cateogries by themselves, do not have any implicit ordering. Yet, uing these distinct categories, we can develop aggregated statistics on the outcome variable `Dep_Del30` to understand how some categories compare to others and rank them--this is the idea behind Breiman's Theorem. Below, we define a function for generating such "Breiman Ranks" given a training dataset, with the example shown for the `Op_Unique_Carrier` feature.
 
 # COMMAND ----------
 
-import pyspark.sql.functions as F
-from pyspark.sql import Window
-
-# Applies Breiman's Method to the categorical feature
+# Applies Breiman's Theorem to the categorical feature
 # Generates the ranking of the categories in the provided categorical feature
 # Orders the categories by the average outcome ascending, from integer 1 to n
 # Note that this should only be run on the training data
@@ -642,12 +656,23 @@ def GenerateBreimanRanks(df, catFeatureName, outcomeName):
                    .withColumn(catFeatureName + "_brieman", F.row_number().over(window))
   return breimanRanks
 
-# Using the provided Breiman's Ranks, applies Breiman's Method to the categorical feature
+# Generate example Breiman ranks for Op_Unique_Carrier
+exBreimanRanks = GenerateBreimanRanks(train_and_val, 'Op_Unique_Carrier', outcomeName)
+display(exBreimanRanks)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC As evident in the output above, we can generate aggregated statistics on the outcome variable for each distinct carrier based ont the sample records present in the dataset for that carrier. Using these aggregated statistics, we can order the categories and assign a ranking from 1 to \\(n\\), where \\(n\\) is the number of distinct categories (in this case 19). This ranking is saved in the new feature `Op_Unique_Carrier_brieman`. Given that the table of Breiman ranks is small and can fit in memory (even for "larger" categorical features like our interaction terms), we can take these training-set-generated Breiman ranks and independently apply them to the entire *Airline Delays* dataset via a broadcast join, similar to the ones shown previously. This code is shown below. In doing so, we effectively transform our categorical feature into a numerical feature, which reduces the need for 1-hot encoding in SVM as well as the number of coefficients to estimate and splits to consider in the Logistic Regression and Decision Tree algorithms respectively. Note that to properly handle unseen values, we will encode unseen categorical features with a `-1` Brieman rank, as is common practice when transforming categorical features to numerical form.
+
+# COMMAND ----------
+
+# Using the provided Breiman's Ranks, applies Breiman's Theorem to the categorical feature
 # and creates a column in the original table using the mapping in breimanRanks variable
 # Note that this effectively transforms the categorical feature to a numerical feature
 # The new column will be the original categorical feature name, suffixed with '_breiman'
-def ApplyBreimansMethod(df, breimanRanks, catFeatureName, outcomeName):
-  if (catFeatureName + "_breiman" in df.columns):
+def ApplyBreimansTheorem(df, breimanRanks, catFeatureName, outcomeName):
+  if (catFeatureName + "_brieman" in df.columns):
     print("Variable '" + catFeatureName + "_brieman" + "' already exists")
     return df
   
@@ -659,6 +684,17 @@ def ApplyBreimansMethod(df, breimanRanks, catFeatureName, outcomeName):
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC With these two functions, we can apply Breiman's Theorem to each of our 8 categorical features separately and generate new columns numerical that will be suffixed with `_brieman`. Note that the Breiman ranks will always be generated by referring to the training dataset only. Once these are generated, they can be applied to any dataset, as the ranks are depending on the training dataset and should not be influenced by our test set. This is done below (note that we'll split the dataset again to ensure that our training dataset has all new features that were generated in the previous sections).
+
+# COMMAND ----------
+
+# Regenerate splits for Breiman ranking prep (so have context of new 
+# features added that require application of Breiman's Theorem)
+mini_train, train, val, test = SplitDataset(airlines)
+
+# COMMAND ----------
+
 # Apply breiman ranking to all datasets, based on ranking developed from training data
 breimanRanksDict = {} # save to apply later as needed
 featuresToApplyBreimanRanks = catFeatureNames + intFeatureNames + holFeatureNames
@@ -667,42 +703,26 @@ for feature in featuresToApplyBreimanRanks:
   ranksDict = GenerateBreimanRanks(train, feature, outcomeName)
   breimanRanksDict[feature] = ranksDict
   
-  # Apply Breiman's method & do feature transformation for all datasets
-  mini_train = ApplyBreimansMethod(mini_train, ranksDict, feature, outcomeName)
-  train = ApplyBreimansMethod(train, ranksDict, feature, outcomeName)
-  val = ApplyBreimansMethod(val, ranksDict, feature, outcomeName)
-  test = ApplyBreimansMethod(test, ranksDict, feature, outcomeName)
-  airlines = ApplyBreimansMethod(airlines, ranksDict, feature, outcomeName)
+  # Apply Breiman's theorem & do feature transformation for all datasets
+  mini_train = ApplyBreimansTheorem(mini_train, ranksDict, feature, outcomeName)
+  train = ApplyBreimansTheorem(train, ranksDict, feature, outcomeName)
+  val = ApplyBreimansTheorem(val, ranksDict, feature, outcomeName)
+  test = ApplyBreimansTheorem(test, ranksDict, feature, outcomeName)
+  airlines = ApplyBreimansTheorem(airlines, ranksDict, feature, outcomeName)
   
 briFeatureNames = [entry + "_brieman" for entry in breimanRanksDict]
 
-# COMMAND ----------
-
-# MAGIC %md 
-# MAGIC #### III Feature Engineering Notes
-# MAGIC - Transformations
-# MAGIC     - Binning (elapsed time, departure/arrival time, )
-# MAGIC     - Forming Indiciator Variables (e.g. departure/arrival delay > 30 min (true/false))
-# MAGIC - Interaction Terms
-# MAGIC     - Interacting variables to make new features ("Day of Year", "Time of week")
-# MAGIC     - Binning interaction terms
-# MAGIC     - Joining interaction terms to make new features
-# MAGIC          - Day of month with month ("Day of Year") -> Holidays indiciator (or near holiday indicator)
-# MAGIC          - Departure/Arrival time day of week ("Time of week")
-# MAGIC - Treatment of Categorical Variables
-# MAGIC     - Categorical variables: Time of Year Variables, Distance Group, Carrier, origin/destination airports
-# MAGIC     - Order  Breiman's Theorem (rank by volume of flights, probability of departure delay, etc)
-# MAGIC     - Make broader categories for categorical variables (not something we've tried yet, but we can do this)
-# MAGIC     - one-hot encoding (svms)
-# MAGIC - Treatment for categorical / binned variables
-# MAGIC     - computing # of flights per category
-# MAGIC     - computing probability of delay per category
-# MAGIC     - Try a model that includes these to see if the model selects them (Decision tree)
+# Show examples of Breiman features
+selectCols = []
+for feature in featuresToApplyBreimanRanks:
+  selectCols.append(feature)
+  selectCols.append(feature + "_brieman")
+display(train.select(selectCols).take(10))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Write and Reference augmented airlines
+# MAGIC With the application of Breiman's Theorem to our dataset, we now have a series of new features that we will leverage in section V for our chosen algorithm implementation, which are listed below. Note that we have checkpointed this work and saved the updated dataset to parquet format to be read from prior to model training (to avoid needing to re-compute these features).
 
 # COMMAND ----------
 
@@ -720,17 +740,15 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Dataset Balancing
-# MAGIC - Describe SMOTE, show visuals from slides, show core parts of SMOTE algorithm (get neighbors, generate synthetic, the RDD-based code) but don't run the code; just load the data
-# MAGIC     - Link to notebook where the smoted dataset was actually generated
-# MAGIC - Describe Majority Class splitting (high-level with pictures from slides), say we'll use this in for stacking in ensemble approach later on
+# MAGIC ### Balancing the Training Dataset
+# MAGIC In the EDA task #3 from the previous section, we saw that our entire *Airline Delays* dataset is highly imbalanced, with only 11% of the flight data constituting flights with departure delays. As discussed previously, in order to develop a useful model that isn't biased by the majority class in the training dataset. To address this dataset imbalance issue, we will concentrate on two primary methods: SMOTE and Majority Class Splitting.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### SMOTe (Synthetic Minority Over-sampling Technique) 
+# MAGIC #### SMOTE (Synthetic Minority Over-sampling Technique) 
 # MAGIC 
-# MAGIC A dataset is imbalanced if the classes are not approximately equally represented. Training a machine learning model with an imbalanced dataset causes the model to develop a certain bias towards the majority class. To tackle the issue of class imbalance, Synthetic Minority Over-sampling Technique (SMOTe) was introduced by Chawla et al. in 2002.(Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357).
+# MAGIC A dataset is imbalanced if the classes are not approximately equally represented. Training a machine learning model with an imbalanced dataset causes the model to develop a certain bias towards the majority class. To tackle the issue of class imbalance, Synthetic Minority Over-sampling Technique (SMOTE) was introduced by Chawla et al. in 2002.(Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357).
 # MAGIC 
 # MAGIC Under-sampling of the majority class or/and over-sampling of the minority class have been proposed as a good means of increasing the sensitivity of a classifier to the minority class. However, under-sampling the majority class samples could potentially lead to loss of important information. Also, over-sampling the minority class could lead to overfitting. The reason is fairly straightforward. Consider the effect on the decision regions in feature space when minority over-sampling is done by replication (sampling with replacement). With replication, the decision region that results in a classification decision for the minority class can actually become smaller and more specific as the minority samples in the region are replicated. This is the opposite of the desired effect. 
 # MAGIC 
@@ -738,15 +756,15 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC 
 # MAGIC Synthetic samples are generated in the following way: 
 # MAGIC - Take the difference between the feature vector (of the sample) under consideration and the feature vector of its nearest neighbor. 
-# MAGIC - Multiply this difference by a random number between 0 and 1.
-# MAGIC - Add it to the feature vector under consideration. 
+# MAGIC - Multiply this difference by a random number between 0 and 1 to scale the difference.
+# MAGIC - Add the scaled difference to the feature vector under consideration. 
 # MAGIC 
-# MAGIC This causes the selection of a random point along the line segment between two specific features. This approach effectively forces the decision region of the minority class to become more general. The synthetic examples cause the classifier to create larger and less specific decision regions (that contain nearby minority class points), rather than smaller and more specific regions. More general regions are now learned for the minority class samples rather than those being subsumed by the majority class samples around them. SMOTE provides more related minority class samples to learn from, thus allowing a learner to carve broader decision regions, leading to more coverage of the minority class. The effect is that decision trees generalize better.
+# MAGIC The diagrams below highlight the steps of capturing the region of k-nearest neighbors for a given datapoint (in orange), connecting the datapoint under consideration to is k-nearest neighbors (also in orange) via the blue dotted lines in feature space, and generating a white synthetic datapoint along these blue dotted lines. 
 
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC **Visualizing SMOTE**
+# MAGIC ##### Visualizing SMOTE
 # MAGIC <img src="https://github.com/nsandadi/Images/blob/master/Visualizing%20SMOTE.png?raw=true" width=100%>
 # MAGIC 
 # MAGIC Source: https://www.youtube.com/watch?v=FheTDyCwRdE
@@ -754,25 +772,31 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Deviations from the original paper**
+# MAGIC By following these steps, we can generate a new random point along the line segment between two specific feature vectors to be a new synthetic datapoint. This approach effectively forces the decision region of the minority class to become more general. The synthetic examples cause the classifier to create larger and less specific decision regions (that contain nearby minority class points), rather than smaller and more specific regions. More general regions are now learned for the minority class samples rather than those being subsumed by the majority class samples around them. SMOTE provides more related minority class samples to learn from, thus allowing a learner to carve broader decision regions, leading to more coverage of the minority class. The effect is that models, in theory, will generalize better.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### Deviations from the original paper
 # MAGIC 
-# MAGIC 1. The original paper shows that a combination of our method of over-sampling the minority class and under-sampling the majority class can achieve better classifier performance (in ROC space) than only under-sampling the majority class. However, for this project we only created "synthetic data" from minority samples without under-sampling the majority class as under-sampling could cause potential loss of information useful for prediction.
+# MAGIC 1. The original paper shows that a combination of our method of over-sampling the minority class and under-sampling the majority class can achieve better classifier performance (in ROC space) than only under-sampling the majority class. However, for this project we only created "synthetic data" from minority samples without under-sampling the majority class, since under-sampling could cause potential loss of information useful for prediction.
 # MAGIC 
-# MAGIC 2. The number of minority class samples from our training set were approximately two million. However, running K Nearest Neighbors on each of these ~2M samples is not scalable as KNN needs to store the list of ~2M feature vectors in memory. We considered and implemented two approaches to address this challenge:
-# MAGIC   > i. Find KNN of each minority sample (feature vector) from a random sample (0.005%) of all the minority sample (feature vectors) since the list of feature vectors needs to fit in memory.
+# MAGIC 2. The number of minority class samples from our training set were approximately two million. However, running K Nearest Neighbors on each of these ~2M samples is not scalable as KNN needs to store the list of ~2M feature vectors in memory. We considered and implemented two approaches to address this scalability challenge:
+# MAGIC   > i. Find KNN of each minority sample (feature vector) from a random sample (0.005%) of all the minority sample (feature vectors). This will produce a list of feature vectors small enough to fit in memory.
 # MAGIC   
 # MAGIC   > ii. Create clusters of minority sample data using K-means algorithm, run KNN on each cluster in parallel and generate synthetic data for each cluster. This approach uses the entire training data. We split the data into 1000 clusters.
 # MAGIC 
-# MAGIC   > Out of the above two approaches, we found the second approach took less time to run. Also, when we compared the distribution of minority samples from the original training set vs. all the minority samples after applying SMOTE, the data generated by the second approach matched this distribution better than the data generated by the first approach. 
+# MAGIC   > Out of the above two approaches, we found the second approach took less time to run. Also, when we compared the distribution of minority samples from the original training set vs. all the minority samples after applying SMOTE, the data generated by the second approach matched the original feature distributions of the training set better than the data generated by the first approach. Thus for the remainder of this analysis, we will proceed with the second approach for balancing our dataset using SMOTE. 
 # MAGIC 
-# MAGIC Here is the link to the notebook with the full implementation of SMOTE for this project:
+# MAGIC We have provided an additional notebook with the full implementation of SMOTE for this project, which can be found here:
 # MAGIC 
 # MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/2791835342809045/revision/1586673126000
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Core logic of SMOTE implementation at scale
+# MAGIC ##### Implementing SMOTE at Scale
+# MAGIC The code below provides a summary of the functions we generated for SMOTE-ing our training dataset. These functions are documented below for reference and have been applied via the notebook mentioned previously.
 
 # COMMAND ----------
 
@@ -868,7 +892,12 @@ def SmoteSampling(predict, k):
 
 # COMMAND ----------
 
-# DBTITLE 1,Preparing SMOTEd data (TODO: remove?)
+# MAGIC %md
+# MAGIC ##### Using SMOTE-d Training Data
+# MAGIC We applied our version of the SMOTE algorithm on the original subset of the training data we have worked with preivously. Since the feature engineering described in earlier in this section has not been applied to our SMOTE-d training data, we will apply the same feature engineering steps here as an additional step before being able to use the SMOTE-d data for training. The result will also be saved to parquet format to help with training moving forward. 
+
+# COMMAND ----------
+
 # Apply Feature Engineering described above to smoted training data
 # Provided Breiman ranks dict should be based on unsmoted training data
 def ApplyFeatureEngineeringToSmotedTrainingData(df, breimanRanksDict):
@@ -923,8 +952,21 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_km
 
 # COMMAND ----------
 
-# MAGIC %sh
-# MAGIC ls -l /databricks/dbfs/user/team20/finalnotebook/*.parquet
+# MAGIC %md
+# MAGIC #### Majority Class Splitting
+# MAGIC Another method for balancing the training dataset is with the use of we call the "Majority Class Splitting" technique, which is described in the paper "New Applications of Ensembles of Classifiers" by Barandela et. al (http://marmota.dlsi.uji.es/WebBIB/papers/2003/paa-2.pdf). Referring to the paper, this is a dataset balancing approach where instead of oversampling the minority class to balance the dataset (similar to what we did with SMOTE), we take an majority lass undersampling approach to get a data subset that is balanced between majority and minority classes. 
+# MAGIC 
+# MAGIC However, unlike the traditional majority class undersampling techniques, majority class splitting will generate multiple balanced subsets of the original dataset. Let's consider a hypothetical case where the ratio of majority to minority classes is 3:1. With the majority class splitting approach, we will take the majority class and randomly split the majority class into 3 parts, where each part is approximately the same size as the minority class. For each of these majority class samples, we will join the sample back with the full minority class. This will in turn generate 3 balanced subsets of the original dataset, each of which contains the full minority class. This technique is depicted in the diagram below:
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC <img src="https://github.com/nsandadi/Images/blob/master/Majority%20Class%20Splitting.png?raw=true" width=50%>
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In the case of the training dataset for the *Airline Delays*, we have a ratio of 7:1 for the majority and minority class, which will generate 7 subsets of data using the majority splitting technique. While this is a possible dataset balance approach for us to use in model training, this approach is best-suited for ensemble approaches, where each model in the ensemble is assigned one balanced subset of data for training. With this approach, each model in the ensemble will have a balanced dataset to learn from, reducing bias in the indiviual models, but no majority class data is lost as would be the case for traditional undersampling techniques. We will explore the use of majority class splitting when we explore ensemble approaches to predictin departure dleays in section V of the report. 
 
 # COMMAND ----------
 
@@ -1635,7 +1677,9 @@ for key, value in plt.items() :
     fig.add_trace(go.Bar(
       x=plt[key]['features'],
       y=plt[key]['importance'],
-      marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
+      #marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x] if x < 12 else px.colors.sequential.RdBu[x%12] , 
+                      range(0,len(plt[key]['features'])))),
       name = '',
       showlegend = False,
     ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
@@ -1645,7 +1689,7 @@ for key, value in plt.items() :
     if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
     fig.update_xaxes(tickangle=-45)
     
-fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles")
+fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles (Majority class splitted)")
 fig.update_layout(xaxis_tickangle=-45)
 fig.show()
 
@@ -1833,7 +1877,7 @@ for key, value in plt.items() :
     if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
     fig.update_xaxes(tickangle=-45)
     
-fig.update_layout(height=400, width=1200, title_text="Feature importance for individual ensembles")
+fig.update_layout(height=400, width=1200, title_text="Feature importance for individual ensembles (Majority class splitted)")
 fig.update_layout(xaxis_tickangle=-45)
 fig.show()
 
@@ -1848,6 +1892,94 @@ fig.show()
 ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_featureIndexer_smoted, 
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
                    )
+
+# COMMAND ----------
+
+from collections import defaultdict
+
+def makedict(em, columns, features, info):
+    plot = defaultdict(dict)
+    rows = int(len(em)/columns)
+    for num, m in enumerate(em):
+        plot[num]['importance'] = em[num]
+        plot[num]['features']   = features
+        plot[num]['x_pos']      = int(num/columns)+1
+        plot[num]['y_pos']      = num%columns+1
+        plot[num]['title']      = info[num]
+    return plot, rows, columns
+
+plt, rows, columns = makedict([
+  list(model_trained_ensemble_lr_smoted.stages[-1].coefficients.toArray()), 
+  list(model_trained_ensemble_svm_smoted.stages[-1].coefficients.toArray()), 
+  list(model_trained_ensemble_rf_smoted.stages[-1].featureImportances.toArray())], 
+  columns=3, 
+  features=[ "model {}".format(s) for s in range(0, 9)],
+  info=[
+    "Logistic regression - weights of ensembles",
+    "SVM - weights of ensembles",
+    "Random forest - weights of ensembles",
+  ]
+)
+
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
+
+for key, value in plt.items() :
+    fig.add_trace(go.Bar(
+      x=plt[key]['features'],
+      y=plt[key]['importance'],
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x], range(0,len(plt[key]['features'])))),
+      name = '',
+      showlegend = False,
+    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(tickangle=-45)
+    
+fig.update_layout(height=400, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
+fig.update_layout(xaxis_tickangle=-45)
+fig.show()
+
+# COMMAND ----------
+
+from collections import defaultdict
+
+def makedict(em, columns, features):
+    plot = defaultdict(dict)
+    rows = int(len(em)/columns)
+    for num, m in enumerate(em):
+        plot[num]['importance'] = list(m.stages[-1].featureImportances.toArray())
+        plot[num]['features']   = features
+        plot[num]['x_pos']      = int(num/columns)+1
+        plot[num]['y_pos']      = num%columns+1
+        plot[num]['title']      = "ensemble model {}".format(num)
+    return plot, rows, columns
+
+plt, rows, columns = makedict(ensemble_model_smoted, columns=3, features=all_ensemble_features)
+
+
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
+
+for key, value in plt.items() :
+    fig.add_trace(go.Bar(
+      x=plt[key]['features'],
+      y=plt[key]['importance'],
+      #marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x] if x < 12 else px.colors.sequential.RdBu[x%12] , 
+                      range(0,len(plt[key]['features'])))),
+      name = '',
+      showlegend = False,
+    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(tickangle=-45)
+    
+fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
+fig.update_layout(xaxis_tickangle=-45)
+fig.show()
 
 # COMMAND ----------
 
@@ -2047,6 +2179,34 @@ fig.show()
 
 # COMMAND ----------
 
+import numpy as np
+
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=("Majority class splitted","Smoted"))
+
+def normalize_vec(x) :
+    vec = np.stack(x).sum(axis=0) 
+    return(vec/np.linalg.norm(vec))
+
+for (row, col), value in [((1, 1), [m.stages[-1].featureImportances.toArray() for m in ensemble_model]), 
+                          ((1, 2), [m.stages[-1].featureImportances.toArray() for m in ensemble_model_smoted])] :
+    fig.add_trace(go.Bar(
+      x = all_ensemble_features,
+      y = normalize_vec(value),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x] if x < 12 else px.colors.sequential.RdBu[x%12] , 
+                            range(0,len(all_ensemble_features)))),
+      name = '',
+      showlegend = False,
+    ), row=row, col=col)
+    
+    fig.update_xaxes(categoryorder='total descending', row=row, col=col)
+    fig.update_xaxes(categoryorder='total descending', row=row, col=col)
+    fig.update_xaxes(tickangle=-60)
+    
+fig.update_layout(height=600, width=1200, title_text="<b>Feature importance for individual ensembles</b>")
+fig.show()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## VI. Conclusions
 # MAGIC * Visualize Model Scores:
@@ -2057,17 +2217,23 @@ fig.show()
 
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
-# MAGIC - bias-variance tradeoff (in dataset balancing discussion)
-# MAGIC - 1-hot encoding for SVM's? 
-# MAGIC - Breiman's Theorem (for ordering categorical variables)
+# MAGIC - bias-variance tradeoff (in dataset balancing discussion)        
+# MAGIC   During algorithm performance evaluation of Decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To overcome the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance.       
+# MAGIC 
+# MAGIC - 1-hot encoding for SVM's?        
+# MAGIC   While using Support Vector Machines classifier, it had to deal with categorical features that didn’t necessarily have an ordering. In such cases instead of converting them to integer codes, we used one hot-encoding.
+# MAGIC   
+# MAGIC - assumptions (for different algorithms - for example OLS vs Trees)        
+# MAGIC   During algorithm exploration we selected a set of variety of algorithms to pick the most suitable one for this particular airline dataset. The algorithms like logistic regression and Naive Bayes tend me very simple in its modeling. These simple models relatively insensitive to variance to different training datasets. But they tend to be highly biased. This problem seem to compound when the data is imbalanced. Algorithms like decision trees and support vector machines are much more complex and as we increase complexity they tend to less and less biased but has a tendency to show a lot of variance between training sets. In other words they seem to overfit to the given training set. In our case we chose the complex model which overfits and used additional methods like random forest, ensembles and hyper paramter tuning to reduce the overfitting of the model.
+# MAGIC   
+# MAGIC - Breiman's Theorem (for ordering categorical variables)           
+# MAGIC   We applied Breiman's Method to some of the categorical features to generate a ranking of within each categorical feature and ordered the categories based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features.
+# MAGIC 
+# MAGIC 
 # MAGIC - how data is stored on cluster - parquet
 # MAGIC - Scalability & sampling (for SMOTE)
 # MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
-
-# COMMAND ----------
-
-all_ensemble_features
 
 # COMMAND ----------
 
