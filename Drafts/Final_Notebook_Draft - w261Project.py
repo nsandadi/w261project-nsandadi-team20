@@ -1412,9 +1412,7 @@ def PrintDecisionTreeModel(model, featureNames):
 # MAGIC 
 # MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
 # MAGIC 
-# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 to use with our decision tree model. 
-# MAGIC 
-# MAGIC Plot accuracy and AUC for val set?
+# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 for our decision tree model. 
 
 # COMMAND ----------
 
@@ -1441,19 +1439,39 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC %md
 # MAGIC ### Training Random Forest on Smoted (Balanced) Training Dataset
 # MAGIC 
-# MAGIC Decision trees tend to result in overfitting because they memorize the training data. To overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated, and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
+# MAGIC Decision trees tend to result in overfitting because they memorize the training data. To overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
 # MAGIC 
-# MAGIC Randomization generally applies to:
+# MAGIC Randomization in a random forest generally applies to:
 # MAGIC - Random selection of samples from the training data (with replacement) from the original training data
 # MAGIC - Random selection of a subset of features
 # MAGIC 
 # MAGIC To improve our model, it is essential to understand what features are important to the model. This can be done through plotting feature importance.
-# MAGIC 
-# MAGIC For hyper-parameter tuning, we used the following parameters: (maxDepth=12, maxBins=255, numTrees=10)
+
+# COMMAND ----------
+
+rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, numTrees=20)
+PredictAndEvaluate(rf_model, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(rf_model, train, 'train', outcomeName)
+PredictAndEvaluate(rf_model, val, 'val', outcomeName)
+
+# COMMAND ----------
+
+import plotly.graph_objects as go
+
+rf_importances =list(rf_model.stages[-1].featureImportances.toArray())
+fig = go.Figure([go.Bar(x=featureNames, y=rf_importances)])
+fig.update_layout(title_text='Feature Importances in Random Forest Model', xaxis={'categoryorder':'total descending'}, xaxis_tickangle=-45)
+fig.show()
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC For hyper-parameter tuning, we used the following parameters: (maxDepth=xx, maxBins=xxx, numTrees=xx)
 # MAGIC - num_trees: 
 # MAGIC  > - Represents the number of trees in the forest.
 # MAGIC  > - More trees reduce overfitting but takes longer to train. 
-# MAGIC  > - Values used are 20, 50, 100, 200.
+# MAGIC  > - Values used are 10, 20, 50, 100, 200.
 # MAGIC  
 # MAGIC - max_depth: 
 # MAGIC  > - Represents the maximum depth of each tree in the forest. 
@@ -1461,27 +1479,18 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC  > - Values used are 5, 10, 15.
 # MAGIC 
 # MAGIC After performing parameter optimization on the trees in the forest, we found that a random forest classifier with xxx trees and xxx maxDepth had xxxx accuracy, xxxx precision, and xxxx recall with AUROC of xxxx. 
+# MAGIC 
+# MAGIC As expected, performance of the random forest model is better than a single decision tree. To improve the performance further, we try an ensemble of random forests (i.e.), forest of forests as our next approach.
 
 # COMMAND ----------
 
-featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
-va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
-rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, numTrees=20)
-# show feature improtance for RF model
-
-# COMMAND ----------
-
-# for maxDepth in [5, 10, 20]:
-#     for numTrees in [20, 50, 100, 200]:
+# for maxDepth in [5, 10, 15]:
+#     for numTrees in [10, 20, 50, 100, 200]:
 #         t0 = time.time()
-#         # Train a RandomForest model.
-#         forest_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=maxDepth, maxBins=200, numTrees=numTrees)
-#         predictions = forest_model.predict(testData.map(lambda x: x.features))
-#         labelsAndPredictions = testData.map(lambda lp: lp.label).zip(predictions)
-#         bNum_val_data = sc.broadcast(val.count())
-#         testMSE = labelsAndPredictions.map(
-#             lambda p: (p[0]-p[1])**2/bNum_test_data.value).reduce(lambda v1,v2: v1+v2)
-#         print('Test Mean Squared Error = ' + str(testMSE) + ' with maxDepth=' + str(maxDepth) + ' numTrees=' + str(numTrees))
+#         # Train a RandomForest model
+#         rforest_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=maxDepth, maxBins=200, numTrees=numTrees)
+#         print("\nmaxDepth:", maxDepth,", numTrees:", numTrees)
+#         PredictAndEvaluate(rf_model, val, 'val', outcomeName)
 #         t1 = time.time()
 #         print("finish in %f seconds" % (t1-t0))
 #         print('*******************')
