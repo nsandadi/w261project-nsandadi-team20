@@ -1459,8 +1459,9 @@ PredictAndEvaluate(rf_model, val, 'val', outcomeName)
 import plotly.graph_objects as go
 
 rf_importances =list(rf_model.stages[-1].featureImportances.toArray())
-fig = go.Figure([go.Bar(x=featureNames, y=rf_importances)])
+fig = go.Figure([go.Bar(x=featureNames, y=rf_importances)]) 
 fig.update_layout(title_text='Feature Importances in Random Forest Model', xaxis={'categoryorder':'total descending'}, xaxis_tickangle=-45)
+fig.update_yaxes(title_text="Feature Importance")
 fig.show()
 
 
