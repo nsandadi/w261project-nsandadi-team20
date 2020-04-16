@@ -1414,9 +1414,7 @@ def PrintDecisionTreeModel(model, featureNames):
 # MAGIC 
 # MAGIC Decision trees are a very popular approach to prediction problems. They can be trained on both categorical and numerical features to perform classification.
 # MAGIC 
-# MAGIC We trained a decision tree model using all the selected and transformed features on the smoted train dataset. The model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. 
-# MAGIC 
-# MAGIC One of the best characteristics of a decision tree is its interpretability. From the printed out version of the tree, we can see that at the root node the decision tree splits on CRS Departure Time and the threshold chosen is noon. Thus, we can infer that there is a significant difference in the number of flights delayed vs. not-delayed before and after noon. 
+# MAGIC We trained a decision tree model using all the feature transformations described in prior sections on the smoted (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on CRS Departure Time and the threshold chosen is 1200 (or noon). Thus, we can infer that a departure time before or after noon along with Origin can give us information about a departure delay. 
 # MAGIC 
 # MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
 # MAGIC 
@@ -1437,7 +1435,7 @@ PrintDecisionTreeModel(dt_model_0.stages[-1], featureNames)
 
 # COMMAND ----------
 
-# Hyper parameter tuning to find optimal parameters
+# Hyper parameter tuning to find optimal parameters for the Decision Tree model
 for max_depth in [5,10,15,20,30,50,100]:
   dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=max_depth, maxBins=200)
   print("\nMax Depth:", max_depth)
@@ -1454,7 +1452,7 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC - Random selection of samples from the training data (with replacement) from the original training data
 # MAGIC - Random selection of a subset of features
 # MAGIC 
-# MAGIC We plot feature importance below for the random forest model to understand which features are given most/least importance.
+# MAGIC We plot feature importance below for the random forest model to understand which features are given most/least importance. Origin Activity and CRS Departure Time are given the most importance. From this, we can generally infer that origin along with the time of the day can give us important information about predicting a departure delay.
 
 # COMMAND ----------
 
@@ -1465,6 +1463,7 @@ PredictAndEvaluate(rf_model, val, 'val', outcomeName)
 
 # COMMAND ----------
 
+# Plot feature importance of the random forest model
 import plotly.graph_objects as go
 
 rf_importances =list(rf_model.stages[-1].featureImportances.toArray())
@@ -1489,13 +1488,17 @@ fig.show()
 # MAGIC  > - The deeper the tree, the more splits it has and it captures more information about the data but leads to overfitting, as discussed above. 
 # MAGIC  > - Values used are 5, 10, 15.
 # MAGIC 
-# MAGIC After performing parameter optimization on the trees in the forest, we found that a random forest classifier with 100 trees and 15 maxDepth had 0.67 accuracy, 0.17 precision, and 0.51 recall with AUROC of 0.65. 
+# MAGIC After performing parameter optimization on the random forest, we found that the random forest classifier with 100 trees and maxDepth of 15 performed best with metrics as follows:
+# MAGIC - Accuracy of 0.67, 
+# MAGIC - Precision of 0.17, 
+# MAGIC - Recall of 0.51,
+# MAGIC - AUROC of 0.65.
 # MAGIC 
 # MAGIC As expected, performance of the random forest model is better than a single decision tree. To improve the performance further, we try an ensemble of random forests (i.e.), forest of forests, as our next approach.
 
 # COMMAND ----------
 
-# Hyper parameter tuning to find optimal parameters
+# Hyper parameter tuning to find optimal parameters for the random forest model
 import time
 
 for maxDepth in [5, 10, 15]:
