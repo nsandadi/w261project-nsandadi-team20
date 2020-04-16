@@ -1404,7 +1404,17 @@ def PrintDecisionTreeModel(model, featureNames):
 # MAGIC %md
 # MAGIC ### Training Decision Tree on Smoted (Balanced) Training Dataset
 # MAGIC 
-# MAGIC Decision trees are a very popular approach to prediction problems. They can be trained from both categorical and numerical features, to perform classification.
+# MAGIC Decision trees are a very popular approach to prediction problems. They can be trained on both categorical and numerical features to perform classification.
+# MAGIC 
+# MAGIC We trained a decision tree model using all the selected and transformed features on the smoted train dataset. The model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. 
+# MAGIC 
+# MAGIC One of the best characteristics of a decision tree is its interpretability. From the printed out version of the tree, we can see that at the root node the decision tree splits on CRS Departure Time and the threshold chosen is noon. Thus, we can infer that there is a significant difference in the number of flights delayed vs. not-delayed before and after noon. 
+# MAGIC 
+# MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
+# MAGIC 
+# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Area Under ROC (AUROC) for the validation set is highest for maxDepth = 10, so we select this value to use with our decision tree model. 
+# MAGIC 
+# MAGIC Plot accuracy and AUC for val set?
 
 # COMMAND ----------
 
@@ -1413,71 +1423,44 @@ va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatur
 
 # COMMAND ----------
 
-# maxDepth = None
-dt_model_0 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=None, maxBins=200)
-PredictAndEvaluate(dt_model_0, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_0, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_0, val, 'val', outcomeName)
+dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
+PredictAndEvaluate(dt_model, train_smoted, 'train_smoted', outcomeName)
+PredictAndEvaluate(dt_model, train, 'train', outcomeName)
+PredictAndEvaluate(dt_model, val, 'val', outcomeName)
 PrintDecisionTreeModel(dt_model_0.stages[-1], featureNames)
 
 # COMMAND ----------
 
-# maxDepth = 10
-dt_model_1 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
-PredictAndEvaluate(dt_model_1, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_1, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_1, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_1.stages[-1], featureNames)
-
-# COMMAND ----------
-
-# maxDepth = 15
-dt_model_2 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=15, maxBins=200)
-PredictAndEvaluate(dt_model_2, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_2, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_2, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_2.stages[-1], featureNames)
-
-# COMMAND ----------
-
-# maxDepth = 20
-dt_model_3 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
-PredictAndEvaluate(dt_model_3, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_3, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_3, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_3.stages[-1], featureNames)
-
-# COMMAND ----------
-
-# maxDepth = 30
-dt_model_4 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
-PredictAndEvaluate(dt_model_4, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_4, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_4, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_4.stages[-1], featureNames)
-
-# COMMAND ----------
-
-# maxDepth = 50
-dt_model_5 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
-PredictAndEvaluate(dt_model_5, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_5, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_5, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_5.stages[-1], featureNames)
-
-# COMMAND ----------
-
-# maxDepth = 100
-dt_model_6 = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=20, maxBins=200)
-PredictAndEvaluate(dt_model_6, train_smoted, 'train_smoted', outcomeName)
-PredictAndEvaluate(dt_model_6, train, 'train', outcomeName)
-PredictAndEvaluate(dt_model_6, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_6.stages[-1], featureNames)
+for max_depth in [5,10,15,20,30,50,100]:
+  dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=max_depth, maxBins=200)
+  print("\nMax Depth:", max_depth)
+  PredictAndEvaluate(dt_model, val, 'val', outcomeName)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Training Random Forest on Smoted (Balanced) Training Dataset
+# MAGIC 
+# MAGIC Decision trees tend to result in overfitting because they memorize the training data. To overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated, and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
+# MAGIC 
+# MAGIC Randomization generally applies to:
+# MAGIC - Random selection of samples from the training data (with replacement) from the original training data
+# MAGIC - Random selection of a subset of features
+# MAGIC 
+# MAGIC To improve our model, it is essential to understand what features are important to the model. This can be done through plotting feature importance.
+# MAGIC 
+# MAGIC For hyper-parameter tuning, we used the following parameters: (maxDepth=12, maxBins=255, numTrees=10)
+# MAGIC - num_trees: 
+# MAGIC  > - Represents the number of trees in the forest.
+# MAGIC  > - More trees reduce overfitting but takes longer to train. 
+# MAGIC  > - Values used are 20, 50, 100, 200.
+# MAGIC  
+# MAGIC - max_depth: 
+# MAGIC  > - Represents the maximum depth of each tree in the forest. 
+# MAGIC  > - The deeper the tree, the more splits it has and it captures more information about the data. 
+# MAGIC  > - Values used are 5, 10, 15.
+# MAGIC 
+# MAGIC After performing parameter optimization on the trees in the forest, we found that a random forest classifier with xxx trees and xxx maxDepth had xxxx accuracy, xxxx precision, and xxxx recall with AUROC of xxxx. 
 
 # COMMAND ----------
 
@@ -1485,6 +1468,23 @@ featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureN
 va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
 rf_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200, numTrees=20)
 # show feature improtance for RF model
+
+# COMMAND ----------
+
+# for maxDepth in [5, 10, 20]:
+#     for numTrees in [20, 50, 100, 200]:
+#         t0 = time.time()
+#         # Train a RandomForest model.
+#         forest_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=maxDepth, maxBins=200, numTrees=numTrees)
+#         predictions = forest_model.predict(testData.map(lambda x: x.features))
+#         labelsAndPredictions = testData.map(lambda lp: lp.label).zip(predictions)
+#         bNum_val_data = sc.broadcast(val.count())
+#         testMSE = labelsAndPredictions.map(
+#             lambda p: (p[0]-p[1])**2/bNum_test_data.value).reduce(lambda v1,v2: v1+v2)
+#         print('Test Mean Squared Error = ' + str(testMSE) + ' with maxDepth=' + str(maxDepth) + ' numTrees=' + str(numTrees))
+#         t1 = time.time()
+#         print("finish in %f seconds" % (t1-t0))
+#         print('*******************')
 
 # COMMAND ----------
 
@@ -2263,13 +2263,13 @@ fig.show()
 # MAGIC   Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. (Did we do this or was it future?)
 # MAGIC        
 # MAGIC - Breiman's Theorem (for ordering categorical variables)           
-# MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*. For example, if you consider the feature *Op_Unique_Carrier* it had 9 unique categories. Using Breiman's method the potential 512 splits were reduced to 8 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like *Origin-Dest* and *Day_Of_Year* where the number of categories were much larger.
+# MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*. For example, if you consider the feature *Op_Unique_Carrier* it had 19 unique categories. Using Breiman's method the potential 524288 splits were reduced to 18 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like *Origin-Dest* and *Day_Of_Year* where the number of categories were much larger.
 # MAGIC 
 # MAGIC - how data is stored on cluster - parquet
 # MAGIC   The original airlines dataset has roughly 31 million records and 54 fields.  While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format in originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman..etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
 # MAGIC 
 # MAGIC - Scalability & sampling (for SMOTE)
-# MAGIC 
+# MAGIC   Given the minority class records were around 2 million we decided to use SMOTE to create a more balanced set.  We had scalability challenges in implementing the KNN algorithm. Trying to create K nearest neighbors for 2M samples doesn’t scale well as we have to store all of these samples in memory for broadcast. To address this challenge we used only a small sample of the minority class which fit the memory well.  The second approach was to create 1000 clusters of minority samples using the K-Means algorithm and run the KNN algorithm in parallel to generate synthetic data.  The second approach is much more scalable (2.5 hrs Vs 24+hrs) and took much less time. It also yielded a synthetic sample closer to the distribution of the original data.
 # MAGIC 
 # MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC   Broadcast variables allow the programmer to keep a read-only variable cached on each machine rather than shipping a copy of it with tasks. In this project we needed to join tables in multiple cases. By using the Broadcast variable, we implemented a map-side join, which is much faster than reduce side join, as there is no shuffle-which is more expensive.  “Brodcast +  sidejoin” were used to implement the addition of holiday feature, Aggregated Origin-Activity, Breiman ranks and to create a balanced airline dataset using SMOTE .
