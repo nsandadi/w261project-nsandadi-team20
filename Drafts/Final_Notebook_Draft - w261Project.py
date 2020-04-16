@@ -37,6 +37,8 @@ from pyspark.ml.classification import LinearSVC
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.feature import Bucketizer, StringIndexer, VectorIndexer, VectorAssembler, OneHotEncoderEstimator
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.classification import RandomForestClassifier
 
 from pyspark.mllib.evaluation import MulticlassMetrics
 
@@ -417,7 +419,7 @@ airlines = airlines.withColumn("CRS_Elapsed_Time", when(train_and_val["CRS_Elaps
 
 # MAGIC %md
 # MAGIC ### Binning Continuous Numerical Features
-# MAGIC As discussed in task #1 of the EDA in section II, one of the transformations we'd like to apply to our continuous numerical features is a binning transformation. In doing so, we can reduce the continuous variables to meaningful increments that will help with interpretability in Logistic Regression and help to reduce the number of splits that needs to be considered by the Decision Tree algorithm. In order to determine reasonable split points, let's evaluate the distributions of each of the continuous variables `CRS_Dep_Time`, `CRS_Arr_Time`, and `CRS_Elapsed_Time` (note that the continuous feature `Distance` has already been binned via the variable `Distance_Group`, so we will not examine this feature). These distribution are shown below:
+# MAGIC As discussed in task #1 of the EDA in section II, one of the transformations we'd like to apply to our continuous numerical features is a binning transformation. In doing so, we can reduce the continuous variables to meaningful increments that will help with interpretability in Logistic Regression and help to reduce the number of splits that needs to be considered by the Decision Tree algorithm. In order to determine reasonable split points, let's evaluate the distributions of each of the continuous variables `CRS_Dep_Time`, `CRS_Arr_Time`, and `CRS_Elapsed_Time` (note that the continuous feature `Distance` has already been binned via the variable `Distance_Group`, so we will not examine this feature). These distribution are shown below (please zoom in for more detail):
 
 # COMMAND ----------
 
@@ -670,14 +672,13 @@ display(exBreimanRanks)
 # Using the provided Breiman's Ranks, applies Breiman's Theorem to the categorical feature
 # and creates a column in the original table using the mapping in breimanRanks variable
 # Note that this effectively transforms the categorical feature to a numerical feature
-# The new column will be the original categorical feature name, suffixed with '_breiman'
+# The new column will be the original categorical feature name, suffixed with '_brieman'
 def ApplyBreimansTheorem(df, breimanRanks, catFeatureName, outcomeName):
   if (catFeatureName + "_brieman" in df.columns):
     print("Variable '" + catFeatureName + "_brieman" + "' already exists")
     return df
   
-  res = df.join(F.broadcast(breimanRanks), df[catFeatureName] == breimanRanks[catFeatureName], how='left') \
-          .drop(breimanRanks[catFeatureName]) \
+  res = df.join(F.broadcast(breimanRanks), catFeatureName, how='left') \
           .drop(breimanRanks['avg(' + outcomeName + ')']) \
           .fillna(-1, [catFeatureName + "_brieman"])
   return res
@@ -948,7 +949,12 @@ def ReadDataFromParquet(dataName):
 # Prep Smoted training data
 train_smoted = ReadDataFromParquet('smoted_train_kmeans')
 train_smoted = ApplyFeatureEngineeringToSmotedTrainingData(train_smoted, breimanRanksDict)
-train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented_smoted_train_kmeans')
+train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented1_smoted_train_kmeans')
+
+# COMMAND ----------
+
+train_smoted = ReadDataFromParquet('smoted_train_kmeans')
+display(train_smoted.take(10))
 
 # COMMAND ----------
 
@@ -1185,12 +1191,16 @@ def ReadDataFromParquet(dataName):
   # Read data back directly from disk 
   return spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
 
+def ReadDataFromParquet1(dataName):
+  # Read data back directly from disk 
+  return spark.read.option("header", "true").parquet(f"dbfs:/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
+
 airlines = ReadDataFromParquet('augmented')
 mini_train = ReadDataFromParquet('augmented_mini_train')
 train = ReadDataFromParquet('augmented_train')
 val = ReadDataFromParquet('augmented_val')
 test = ReadDataFromParquet('augmented_test')
-train_smoted = ReadDataFromParquet('augmented_smoted_train_kmeans')
+train_smoted = ReadDataFromParquet1('augmented2_smoted_train_kmeans')
 
 ###########################################
 # Define all variables for easy reference #
@@ -1328,8 +1338,6 @@ display(toy_dataset)
 
 # COMMAND ----------
 
-from pyspark.ml.classification import DecisionTreeClassifier
-from pyspark.ml.classification import RandomForestClassifier
 
 # Encodes a string column of labels to a column of label indices
 # Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
@@ -1429,6 +1437,7 @@ PrintDecisionTreeModel(dt_model_0.stages[-1], featureNames)
 
 # COMMAND ----------
 
+# Hyper parameter tuning to find optimal parameters
 for max_depth in [5,10,15,20,30,50,100]:
   dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=max_depth, maxBins=200)
   print("\nMax Depth:", max_depth)
@@ -1445,7 +1454,7 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC - Random selection of samples from the training data (with replacement) from the original training data
 # MAGIC - Random selection of a subset of features
 # MAGIC 
-# MAGIC To improve our model, it is essential to understand what features are important to the model. This can be done through plotting feature importance.
+# MAGIC We plot feature importance below for the random forest model to understand which features are given most/least importance.
 
 # COMMAND ----------
 
@@ -1462,43 +1471,43 @@ rf_importances =list(rf_model.stages[-1].featureImportances.toArray())
 fig = go.Figure([go.Bar(x=featureNames, y=rf_importances)]) 
 fig.update_layout(title_text='Feature Importances in Random Forest Model', xaxis={'categoryorder':'total descending'}, xaxis_tickangle=-45)
 fig.update_yaxes(title_text="Feature Importance")
+fig.update_xaxes(title_text="Features")
 fig.show()
 
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC For hyper-parameter tuning, we used the following parameters: (maxDepth=xx, maxBins=xxx, numTrees=xx)
-# MAGIC - num_trees: 
+# MAGIC For hyper-parameter tuning, we used the following parameters: 
+# MAGIC - numTrees: 
 # MAGIC  > - Represents the number of trees in the forest.
 # MAGIC  > - More trees reduce overfitting but takes longer to train. 
 # MAGIC  > - Values used are 10, 20, 50, 100, 200.
 # MAGIC  
-# MAGIC - max_depth: 
+# MAGIC - maxDepth: 
 # MAGIC  > - Represents the maximum depth of each tree in the forest. 
-# MAGIC  > - The deeper the tree, the more splits it has and it captures more information about the data. 
+# MAGIC  > - The deeper the tree, the more splits it has and it captures more information about the data but leads to overfitting, as discussed above. 
 # MAGIC  > - Values used are 5, 10, 15.
 # MAGIC 
-# MAGIC After performing parameter optimization on the trees in the forest, we found that a random forest classifier with xxx trees and xxx maxDepth had xxxx accuracy, xxxx precision, and xxxx recall with AUROC of xxxx. 
+# MAGIC After performing parameter optimization on the trees in the forest, we found that a random forest classifier with 100 trees and 15 maxDepth had 0.67 accuracy, 0.17 precision, and 0.51 recall with AUROC of 0.65. 
 # MAGIC 
-# MAGIC As expected, performance of the random forest model is better than a single decision tree. To improve the performance further, we try an ensemble of random forests (i.e.), forest of forests as our next approach.
+# MAGIC As expected, performance of the random forest model is better than a single decision tree. To improve the performance further, we try an ensemble of random forests (i.e.), forest of forests, as our next approach.
 
 # COMMAND ----------
 
-# for maxDepth in [5, 10, 15]:
-#     for numTrees in [10, 20, 50, 100, 200]:
-#         t0 = time.time()
-#         # Train a RandomForest model
-#         rforest_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=maxDepth, maxBins=200, numTrees=numTrees)
-#         print("\nmaxDepth:", maxDepth,", numTrees:", numTrees)
-#         PredictAndEvaluate(rf_model, val, 'val', outcomeName)
-#         t1 = time.time()
-#         print("finish in %f seconds" % (t1-t0))
-#         print('*******************')
+# Hyper parameter tuning to find optimal parameters
+import time
 
-# COMMAND ----------
-
-# eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+for maxDepth in [5, 10, 15]:
+    for numTrees in [10, 20, 50, 100, 200]:
+        t0 = time.time()
+        # Train a RandomForest model
+        rforest_model = TrainRandomForestModel(train_smoted, [va_base], outcomeName, maxDepth=maxDepth, maxBins=200, numTrees=numTrees)
+        print("\nmaxDepth:", maxDepth,", numTrees:", numTrees)
+        PredictAndEvaluate(rforest_model, val, 'val', outcomeName)
+        t1 = time.time()
+        print("finish in %f seconds" % (t1-t0))
+        print('*******************')
 
 # COMMAND ----------
 
@@ -1529,7 +1538,8 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Transform data for Ensemble
+# MAGIC 
+# MAGIC Data transformation step
 # MAGIC 
 # MAGIC `mini_train`, `train`, `val` and `test` is transformed using VectorAssmebler into a feature vector - label format. The feature indexer is also calculated. 
 
@@ -1566,6 +1576,7 @@ ensemble_mini_train.show(2)
 
 # COMMAND ----------
 
+# Intermediate checkpoint creation
 if False :
   ensemble_val.write.mode('overwrite').format("parquet").save("dbfs:/user/team20/finalnotebook/ensemble_val.v1.parquet")
   ensemble_test.write.mode('overwrite').format("parquet").save("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
@@ -1949,6 +1960,94 @@ ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_feature
 
 from collections import defaultdict
 
+def makedict(em, columns, features):
+    plot = defaultdict(dict)
+    rows = int(len(em)/columns)
+    for num, m in enumerate(em):
+        plot[num]['importance'] = list(m.stages[-1].featureImportances.toArray())
+        plot[num]['features']   = features
+        plot[num]['x_pos']      = int(num/columns)+1
+        plot[num]['y_pos']      = num%columns+1
+        plot[num]['title']      = "ensemble model {}".format(num)
+    return plot, rows, columns
+
+plt, rows, columns = makedict(ensemble_model_smoted, columns=3, features=all_ensemble_features)
+
+
+fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
+
+for key, value in plt.items() :
+    fig.add_trace(go.Bar(
+      x=plt[key]['features'],
+      y=plt[key]['importance'],
+      #marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
+      marker_color=list(map(lambda x: px.colors.sequential.thermal[x] if x < 12 else px.colors.sequential.RdBu[x%12] , 
+                      range(0,len(plt[key]['features'])))),
+      name = '',
+      showlegend = False,
+    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
+    fig.update_xaxes(tickangle=-45)
+    
+fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
+fig.update_layout(xaxis_tickangle=-45)
+fig.show()
+
+# COMMAND ----------
+
+if False : 
+  for i, model in enumerate(ensemble_model_smoted):
+    model.save("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) +  ".v2.model")
+
+# COMMAND ----------
+
+# Construct a new data set based on the output of base classifiers
+ensemble_prediction_smoted = do_ensemble_prediction(ensemble_model_smoted, train_combiner_smoted)
+
+# COMMAND ----------
+
+# Assemble and transform data for second level training
+reduced_df_smoted = assemble_dataframe(ensemble_prediction_smoted)
+ensemble_transformed_smoted = do_transform_final(reduced_df_smoted)
+
+# COMMAND ----------
+
+ensemble_featureIndexer_smoted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=3).fit(ensemble_transformed_smoted)
+
+# COMMAND ----------
+
+# Learn a second-level classifier based on training set from first-level.
+
+# Logistic Regression
+model_trained_ensemble_lr_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
+
+# COMMAND ----------
+
+# Linear SVM
+model_trained_ensemble_svm_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              LinearSVC(featuresCol="indexedFeatures", maxIter=10, regParam=0.1))
+
+# COMMAND ----------
+
+# Random forest
+model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
+              RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
+
+# COMMAND ----------
+
+if False : 
+  model_trained_ensemble_lr_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v2.model")
+  model_trained_ensemble_svm_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm_smoted.v2.model")
+  model_trained_ensemble_rf_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf_smoted.v2.model")
+
+# COMMAND ----------
+
+from collections import defaultdict
+
 def makedict(em, columns, features, info):
     plot = defaultdict(dict)
     rows = int(len(em)/columns)
@@ -1992,94 +2091,6 @@ for key, value in plt.items() :
 fig.update_layout(height=400, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
 fig.update_layout(xaxis_tickangle=-45)
 fig.show()
-
-# COMMAND ----------
-
-from collections import defaultdict
-
-def makedict(em, columns, features):
-    plot = defaultdict(dict)
-    rows = int(len(em)/columns)
-    for num, m in enumerate(em):
-        plot[num]['importance'] = list(m.stages[-1].featureImportances.toArray())
-        plot[num]['features']   = features
-        plot[num]['x_pos']      = int(num/columns)+1
-        plot[num]['y_pos']      = num%columns+1
-        plot[num]['title']      = "ensemble model {}".format(num)
-    return plot, rows, columns
-
-plt, rows, columns = makedict(ensemble_model_smoted, columns=3, features=all_ensemble_features)
-
-
-fig = make_subplots(rows=rows, cols=columns, subplot_titles=tuple([plt[key]['title'] for key, value in plt.items()]))
-
-for key, value in plt.items() :
-    fig.add_trace(go.Bar(
-      x=plt[key]['features'],
-      y=plt[key]['importance'],
-      #marker_color=list(map(lambda x: px.colors.sequential.thermal[x%12], range(0,len(plt[key]['features'])))),
-      marker_color=list(map(lambda x: px.colors.sequential.thermal[x] if x < 12 else px.colors.sequential.RdBu[x%12] , 
-                      range(0,len(plt[key]['features'])))),
-      name = '',
-      showlegend = False,
-    ), row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-    
-    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-    fig.update_xaxes(categoryorder='total descending', row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-    if plt[key]['y_pos'] == 1: fig.update_yaxes(title_text="Feature importance", row=plt[key]['x_pos'], col=plt[key]['y_pos'])
-    fig.update_xaxes(tickangle=-45)
-    
-fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
-fig.update_layout(xaxis_tickangle=-45)
-fig.show()
-
-# COMMAND ----------
-
-if False : 
-  for i, model in enumerate(ensemble_model_smoted):
-    model.save("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) +  ".v1.model")
-
-# COMMAND ----------
-
-# Construct a new data set based on the output of base classifiers
-ensemble_prediction_smoted = do_ensemble_prediction(ensemble_model_smoted, train_combiner_smoted)
-
-# COMMAND ----------
-
-# Assemble and transform data for second level training
-reduced_df_smoted = assemble_dataframe(ensemble_prediction_smoted)
-ensemble_transformed_smoted = do_transform_final(reduced_df_smoted)
-
-# COMMAND ----------
-
-ensemble_featureIndexer_smoted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=3).fit(ensemble_transformed_smoted)
-
-# COMMAND ----------
-
-# Learn a second-level classifier based on training set from first-level.
-
-# Logistic Regression
-model_trained_ensemble_lr_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
-              LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
-
-# COMMAND ----------
-
-# Linear SVM
-model_trained_ensemble_svm_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
-              LinearSVC(featuresCol="indexedFeatures", maxIter=10, regParam=0.1))
-
-# COMMAND ----------
-
-# Random forest
-model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, ensemble_featureIndexer_smoted, 
-              RandomForestClassifier(featuresCol="indexedFeatures", maxBins=20, maxDepth=5, numTrees=5, impurity='gini'))
-
-# COMMAND ----------
-
-if False : 
-  model_trained_ensemble_lr_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v1.model")
-  model_trained_ensemble_svm_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm_smoted.v1.model")
-  model_trained_ensemble_rf_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf_smoted.v1.model")
 
 # COMMAND ----------
 
