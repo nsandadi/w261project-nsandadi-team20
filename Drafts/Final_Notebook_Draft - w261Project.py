@@ -1412,7 +1412,7 @@ def PrintDecisionTreeModel(model, featureNames):
 # MAGIC 
 # MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
 # MAGIC 
-# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Area Under ROC (AUROC) for the validation set is highest for maxDepth = 10, so we select this value to use with our decision tree model. 
+# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 to use with our decision tree model. 
 # MAGIC 
 # MAGIC Plot accuracy and AUC for val set?
 
@@ -1423,7 +1423,7 @@ va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatur
 
 # COMMAND ----------
 
-dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=10, maxBins=200)
+dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=15, maxBins=200)
 PredictAndEvaluate(dt_model, train_smoted, 'train_smoted', outcomeName)
 PredictAndEvaluate(dt_model, train, 'train', outcomeName)
 PredictAndEvaluate(dt_model, val, 'val', outcomeName)
