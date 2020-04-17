@@ -1,5 +1,15 @@
 # Databricks notebook source
 # MAGIC %md
+# MAGIC # SMOTE (using K-means)
+# MAGIC 
+# MAGIC ## Predicting Airline Delays
+# MAGIC ###### W261 Spring 2020 
+# MAGIC ###### Presentation Date: April 16th, 2020
+# MAGIC ###### Team 20: Diana Iftimie, Shaji K Kunjumohamed, Navya Sandadi, & Shobha Sankar
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Load the data
 
 # COMMAND ----------
