@@ -167,7 +167,7 @@ predict = model.transform(featureVect)
 
 # COMMAND ----------
 
-# Check the average number of data points in each cluster
+# Visualize the distribution of data points in each cluster
 display(predict.groupBy('prediction').count().orderBy('prediction'))
 
 # COMMAND ----------
@@ -175,11 +175,6 @@ display(predict.groupBy('prediction').count().orderBy('prediction'))
 # Re-order the columns in the dataframe
 predict = predict.select(['prediction','features'])
 predict.show(10)
-
-# COMMAND ----------
-
-# Check the number of records
-predict.count()
 
 # COMMAND ----------
 
@@ -387,7 +382,7 @@ display(train.groupby('DEP_DEL30').count())
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500.groupby('DEP_DEL30').count())
+display(smoted_train_kmeans.groupby('DEP_DEL30').count())
 
 # COMMAND ----------
 
