@@ -758,7 +758,7 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 
 # MAGIC %md 
 # MAGIC ##### Visualizing SMOTE
-# MAGIC <img src="https://github.com/nsandadi/Images/blob/master/Visualizing%20SMOTE.png?raw=true" width=100%>
+# MAGIC <img src="https://github.com/nsandadi/Images/blob/master/Visualizing%20SMOTE.png?raw=true" width=80%>
 # MAGIC 
 # MAGIC Source: https://www.youtube.com/watch?v=FheTDyCwRdE
 
@@ -789,7 +789,7 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 
 # MAGIC %md
 # MAGIC ##### Implementing SMOTE at Scale
-# MAGIC The code below provides a summary of the functions we generated for SMOTE-ing our training dataset. These functions are documented below for reference and have been applied via the notebook mentioned previously.
+# MAGIC The code below provides a summary of the functions we generated for SMOTEing our training dataset. These functions are documented below for reference and have been applied via the notebook mentioned previously.
 
 # COMMAND ----------
 
@@ -888,8 +888,8 @@ def SmoteSampling(predict, k):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##### Using SMOTE-d Training Data
-# MAGIC We applied our version of the SMOTE algorithm on the original subset of the training data we have worked with preivously. Since the feature engineering described in earlier in this section has not been applied to our SMOTE-d training data, we will apply the same feature engineering steps here as an additional step before being able to use the SMOTE-d data for training. The result will also be saved to parquet format to help with training moving forward. 
+# MAGIC ##### Using SMOTEd Training Data
+# MAGIC We applied our version of the SMOTE algorithm on the original subset of the training data we have worked with preivously. Since the feature engineering described in earlier in this section has not been applied to our SMOTEd training data, we will apply the same feature engineering steps here as an additional step before being able to use the SMOTEd data for training. The result will also be saved to parquet format to help with training moving forward. 
 
 # COMMAND ----------
 
@@ -967,73 +967,55 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented1_smoted_train_k
 
 # MAGIC %md
 # MAGIC ## IV. Algorithm Exploration
-# MAGIC - Apply 2-3 Algorithms
-# MAGIC     - Logistic Regression
-# MAGIC     - SVM
-# MAGIC     - Naive Bayes
-# MAGIC     - Decision Tree
-# MAGIC - Expectations / Tradeoffs
-# MAGIC     - All able to do classificaiton (Delay/No Delay)
-# MAGIC     - LR: Interpretable (good), get estimate for effect of each variable, manual feature selection required, need to deal with multi-collinearity, among other things
-# MAGIC     - SVM: needed to transform & one-hot encode categorical variables
-# MAGIC     - DT: Not a lot of hyper parameter tuning/feature selection (most automated), 
-# MAGIC - Results
 # MAGIC 
-# MAGIC -- See Task 3 Submission :) --
-# MAGIC https://docs.google.com/document/d/1IaGOgYWSRCH-WgDzJ7N2Lw6y5h8zxpTQ8HHg9AqpML8/edit?usp=sharing
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ### Considerations for Algorithm Exploration
+# MAGIC In our original problem statement introduced in section I, we pointed out that the goal of this analysis is to develop a model that is able to predict significant departure delays (30 minutes or more); this inherently is a classification task, where our positive class is where `Dep_Del30 == 1` (delay) and our negative class is `Dep_Del30 == 0` (no delay). As we introduced near the start of section II, to accomplish this classification task, we considered a vareity of models suitable for classification problems for the purpose of our algorithm exploration. Based on our experience working with machine learning models in W207, we decided to consider the following models:
+# MAGIC 
+# MAGIC - Logistic Regression
+# MAGIC - Decision Trees
+# MAGIC - Naive Bayes
+# MAGIC - Support Vector Machines
+# MAGIC 
+# MAGIC In picking these models for our initial exploration, we considered a variety of factors in addition to the requirement that we select a model that is well-suited for our classification task. Our three additional considerations for our algorithm selection included the following:
+# MAGIC 
+# MAGIC - the resulting model must be interpretable / explainable
+# MAGIC - the algorithm must scale 
+# MAGIC - the algorithm must handle continuous and categorical variables
+# MAGIC 
+# MAGIC Because we want to be able to not only predict whether a significant departure delay occurs for a given flight, but also determine the underlying factors that may lead to departure delays, we were also interested in looking at explainable models, thus the consideration of Decision Trees, Logistic Regression, and Naive Bayes. Additionally, given the size of our *Airline Delays* dataset, we wanted to make sure that the models we considered could handle large datasets, such as Decision Trees and Naive Bayes. Finally, given that our dataset includes both numerical and categorical features, we wanted to make sure that we chose a model that was well suited for handling both numerical and categorical features, which all four of these models are able to do so. While not all four of these models satisfy all three of our additional conditions, we decided for the sake of exploration to look at all four regardless.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC For the algorithm exploration the important considerations were as follows:       
-# MAGIC - Algorithm must scale 
-# MAGIC - it must be suitable for classification
-# MAGIC - it must handle continuous and categorical variables
-# MAGIC - model must be interpretable / explainable
+# MAGIC ### Applying our Candidate Algorithms
 # MAGIC 
-# MAGIC We performed minimal EDA and feature engineering for this exploration. The outcome variable Dep_Del30 marked the flight as "delayed" if the departure delay was 30 minutes or more. Given this dataset roughly had 10% of the true positives, it was a very imbalanced dataset. This means by taking a baseline model which simply assumes the outcome as 'no delay' it achieved an accuracy of ~90%. But practically this would be a useless model as it fails to identify any true positives. Instead we need to consider a model that will improve the repdiction of more true positives/ reduce false negatives.  
+# MAGIC For the sake of the algorithm exploration, we decided to keep things fairly simple and work off of the original dataset without any major feature engineering or dataset balancing applied to the dataset. That is, for all four algorithms, we will consider all 12 relevant features for predicting departure delays described in section I and our custom-made outcome variable `Dep_Del30`. 
 # MAGIC 
-# MAGIC Based on the modeling results we observed the following:     
-# MAGIC - Both logistic regression and SVM had high accuracy but failed to predict any of the true positives. Both of these models also failed to predict any false positives. Based on this we concluded both the models were predicting "no delay" all the time.
-# MAGIC - Naive Bayes identified the most number of true positives, but it also had roughly 5 times as many false positives. It had an accuracy slightly better than a coin toss.
-# MAGIC - Decision tree identified some true positives, it identified a similar set of false positives. It also demonstrated good accuracy and precision. Its recall rate wasn't very high. Overall emperically, this model looked much more balanced fit for our further analysis.
+# MAGIC Note that because we are not balancing the dataset for this exploration, simply taking a baseline model which predicts the outcome to be 'no delay' (the majority class) at inference time will achieve a high accuracy of about 89%, which practically speaking, is not a useful model as it would fail to identify any true positives. Regardless, for simplicity of this algorithm exploration, we will make use of the original unbalanced, un-feature engineered dataset for high-level exploration. We will also fix any relevant hyperparameters and will not look at exploring any tuning of these hyperparameters.
 # MAGIC 
-# MAGIC Theoretically logistic regression is very easy to model, interpret and train. The main limitation of logistic regression is the **multi-collinearity** among the features. Logisitc regression is also susceptible to overfitting due to imbalanced data. Support verctor machines on the other hand is not suitable for large datasets. As these algorithms use hyperplanes it is much harder to interpret them. Larger data sets take a long time to process in relation to other models. With Naive Bayes, they are easy to process and scale really well. Like logistic regression it makes an assumption that features are independent of each other which is not true in many cases.
-# MAGIC 
-# MAGIC On the other hand, decision trees also seemed theoretically promising. Compared to other algorithms desicion trees require less data preparation during pre-processing. It also doesn't require normalization or scaling and can handle null values gracefully. It is also easily interpretable. They require higher time to train the model. But based on the keypoints discussed able we picked the decision tree as our algorithm to move forward.
+# MAGIC In the next few sections of code, we prepare the dataset for our algorithm exploration, as well as our model training and evaluation functions. Note that we will be considering a variety of metrics, including accuracy, precision, recall, F1-score, as well as aggregated metrics such as area under the curve, and the full confusion matrix. This will allow us to understand the full story of how these models perform in a baseline scenario.
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Dataset Preparation for Algorithm Exploration
-
-# COMMAND ----------
-
-
-#subset the dataset to the features in numFeatureNames, contNumFeatureNames  & catFeatureNames
-mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
-train_algo = train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
-val_algo = val.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
-
+# DBTITLE 1,Dataset Preparation for Algorithm Exploration
 # Define outcome & features to use in model development
-# numFeatureNames are continuous features
+# numFeatureNames & contNumFeatureNAmes are continuous features
 # catFeatureNames are categorical features
-
 outcomeName = 'Dep_Del30'
 numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'Distance_Group']
 contNumFeatureNames = ['CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance']
 catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
 
+# subset the dataset to the features in numFeatureNames, contNumFeatureNames  & catFeatureNames (the original features) & our outcome
+mini_train_algo = mini_train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+train_algo = train.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+val_algo = val.select([outcomeName] + numFeatureNames + contNumFeatureNames + catFeatureNames)
+
 # COMMAND ----------
 
-# this function train the model 
+# DBTITLE 1,Function for Training Candidate Models
+# This function is for training all four of our candidate models in baseline scenarios 
 # Only support vector machines (svm) use one hot encoding for the categorical variable 
-
 def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
     indexers = [ StringIndexer(inputCol=cat, outputCol= cat + "_indexed", handleInvalid="keep") for cat in categoricalCols ]
@@ -1047,7 +1029,7 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
     else:
       assembler = VectorAssembler(inputCols = continuousCols + [cat + "_indexed" for cat in categoricalCols], outputCol = "features")
       
-    # choose the appropriate model regression  
+    # choose the appropriate model constrution, depending on the algorithm  
     if algorithm == 'lr':
       lr = LogisticRegression(labelCol = outcomeName, featuresCol="features", maxIter=100, regParam=0.1, elasticNetParam=0)
       pipeline = Pipeline(stages=indexers + [assembler,lr])
@@ -1076,18 +1058,11 @@ def train_model(df,algorithm,categoricalCols,continuousCols,labelCol,svmflag):
 
 # COMMAND ----------
 
-# MAGIC  %md
-# MAGIC  ### Model Evaluation Function
-
-# COMMAND ----------
-
+# DBTITLE 1,Function for Evaluating Candidate Models
 # Model Evaluation
-# This function takes predictions dataframe and outcomeName and calculates the scores.
+# This function takes predictions dataframe and outcomeName, evaluates the predictions,
+# and calculates the scores for multiple metrics.
 # If the returnval is true it will return the values otherwise it will print it.
-from pyspark.ml.evaluation import BinaryClassificationEvaluator
-import pandas as pd
-
-# Evaluates model predictions for the provided predictions
 # Predictions must have two columns: prediction & label
 def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', ReturnVal=False):
     
@@ -1130,40 +1105,52 @@ def EvaluateModelPredictions(predict_df, dataName=None, outcomeName='label', Ret
         round(accuracy, 7), round(precision, 7),round(recall, 7),round(fscore, 7), round(areaUnderROC, 7), round(areaUnderPRC, 7))),
     print("\nConfusion Matrix:\n", pd.DataFrame.from_dict(metric, orient='index', columns=['count']), '\n')
 
-# This function takes a trained model and predicts outcome.
-# And calls model evaluation function
+# This function takes a trained model, generates predictions,
+# And calls model evaluation function to evaluate the predictions
 def PredictAndEvaluate(model, data, dataName, outcomeName):
   predictions = model.transform(data)
   EvaluateModelPredictions(predictions, dataName, outcomeName)
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Algorithm Exploration - Logistic Regression, Decision Tress, Naive Bayes & Support Vector Machines
-
-# COMMAND ----------
-
-# Train the model using the "train" dataset and test against the "val" dataset
-dataName = 'val'
+# DBTITLE 1,Exploring Algorithms - Logistic Regression (lr), Decision Trees (dt), Naive Bayes (nb), & Support Vector Machines (svm)
+# Train the model using the "train" dataset and evaluate against the "val" dataset
 algorithms = ['lr','dt','nb','svm']
 for algorithm in algorithms:
   newnumFeatureNames = numFeatureNames + contNumFeatureNames
-  titleName = dataName+ ' with ' + algorithm
-  # if svm the train_model need to apply one-hot encoding
-  if algorithm == 'svm':
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=True)
-    PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
-  else:
-    tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=False)
-    PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
 
+  # Train on training data & evaluate validation data
+  tr_model = train_model(train_algo, algorithm, catFeatureNames, newnumFeatureNames, outcomeName, svmflag=algorithm == 'svm')
+  PredictAndEvaluate(tr_model, val_algo, 'val with ' + algorithm, outcomeName)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## The Chosen Algorithm: Decision Trees
-# MAGIC * Things Navya said in presentation + diana's list
-# MAGIC * Extension of trees is RF & ensembles of ensembles of ...
+# MAGIC ### Analyzing Candidate Algorithm Results & Choosing our Algorithm 
+# MAGIC 
+# MAGIC Based on the modeling results displayed above for all four of our candidate models, we observed the following:     
+# MAGIC - Both Logistic Regression and SVM had high accuracy but failed to predict any of the true positives. Both of these models also failed to predict any false positives. Based on this we concluded both the models were predicting "no delay" all the time.
+# MAGIC - Naive Bayes identified the most number of true positives, but it also had roughly 5 times as many false positives. It had an accuracy slightly better than a coin toss.
+# MAGIC - Decision Tree identified some true positives, it identified a similar set of false positives. It also demonstrated good accuracy and precision. Its recall rate wasn't very high. Overall emperically, this model looked much more balanced fit for our further analysis.
+# MAGIC 
+# MAGIC Theoretically speaking, Logistic Regression is very easy to model, interpret, and train. The main limitation of Logistic Regression is the multi-collinearity present among some of the features. Logisitc regression is also susceptible to overfitting due to imbalanced data. 
+# MAGIC 
+# MAGIC Support Vector Machines on the other hand is not suitable for large datasets. As these algorithms use hyperplanes to separate the two classes in feature space, it is much harder to interpret them and larger data sets require a much longer time to process in relation to our other candidate models. 
+# MAGIC 
+# MAGIC With Naive Bayes, this model is fairly simple to process and scales really well. Much like Logistic Regression, Naive Bayes does makes the naive assumption that the features under consieration are independent of each other, which is not true in many cases, including for the our scenario.
+# MAGIC 
+# MAGIC By comparison to all three of these algorithms, the Decision Tree algorithm seems to be the most promising for our scenario, especially from a theoretical perspective. Compared to the other candidate algorithms, we saw the following benefits (note that all four the the requirements described previously are satisfied by the Decision Tree algorithm):
+# MAGIC - the algorithm is highly interpretable, given that the decision rules can be easily interpretted by anyone
+# MAGIC - they require little-to-no data preparation during pre-processing function to successfully (can work with both categorical & numerical features)
+# MAGIC - the algorithm also doesn't require normalization or scaling of our features and can handle null or unknown values gracefully
+# MAGIC - they can still easily benefit from certain data preparation, such as Breiman's theorem applications & binning of numerical features
+# MAGIC - they automatically do feature selection and can highlight feature importance using information gain metrics
+# MAGIC - they can automatically generate relevant interaction terms
+# MAGIC - the algorithm requires very little hyperparameter tuning
+# MAGIC - inference is fast & explainable
+# MAGIC - the algorithm itself can be parallelize at training, which can help with scalability
+# MAGIC 
+# MAGIC With that said, one of the consequences that do come with Decision Trees is that they can tend to overfit as they try to memorize the data, leading to an increase in variance in the model (which is the case with the results of our candidate model shown above). While this might be a limitation to make us pause and reconsider this algorithm, Decision Trees can easily be extended to the Random Forest algorithm to help with the bias-variance tradeoff that may be present in a single decision tree. Thus, for these reasons, we will continue our analysis using **Decision Trees** as our algorithm of choice and look further to extending to Random Forests and other ensembles of trees approaches in the next section.
 
 # COMMAND ----------
 
