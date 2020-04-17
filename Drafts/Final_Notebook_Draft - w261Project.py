@@ -403,16 +403,8 @@ GetStats(train_and_val)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC The only odd value seems to be the minimum value for `CRS_Elapsed_Time` that takes on a value of -99.0. Upon closer inspection, there's no true indication for why this datapoint is negative, except that it is likely a mistake in the dataset, since the difference in the departure and arrival times is 76 minutes, which should be the actual value of `CRS_Elapsed_Time`. For this reason, we will correct the `CRS_Elapsed_Time` for this flight record.
-
-# COMMAND ----------
-
-# Correct CRS_ElapsedTime = -99
-airlines = airlines.withColumn("CRS_Elapsed_Time", when(train_and_val["CRS_Elapsed_Time"] == -99, 76.0).otherwise(train_and_val["CRS_Elapsed_Time"]))
-
-# COMMAND ----------
-
-# MAGIC %md
+# MAGIC The only odd value seems to be the minimum value for `CRS_Elapsed_Time` that takes on a value of -99.0. Upon closer inspection, there's no true indication for why this datapoint is negative, except that it is likely a mistake in the dataset, since the difference in the departure and arrival times is 76 minutes, which should be the actual value of `CRS_Elapsed_Time`. However, given that we have about 24 million data points to train from, having this single data point be slightly incorrect should not affect the results of our training. For this reason, we'll leave the data point unchanged.
+# MAGIC 
 # MAGIC Finally, note that we do not appear to have any null values in our training and validation data and thus we will not need to handle missing values for the purpose of training. However, there is a potential that our test data has missing values and or the features of the test data take on values that were not seen in the training data. Because this is always a possibility at inference time, we will need to make sure our data transformations are robust to such cases--we will evaluate this on a case-by-case basis.
 
 # COMMAND ----------
@@ -791,7 +783,7 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC 
 # MAGIC We have provided an additional notebook with the full implementation of SMOTE for this project, which can be found here:
 # MAGIC 
-# MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/2791835342809045/revision/1586673126000
+# MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/2791835342809045/revision/1587101612000
 
 # COMMAND ----------
 
@@ -955,11 +947,6 @@ train_smoted = WriteAndRefDataToParquet(train_smoted, 'augmented1_smoted_train_k
 
 # COMMAND ----------
 
-train_smoted = ReadDataFromParquet('smoted_train_kmeans')
-display(train_smoted.take(10))
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC #### Majority Class Splitting
 # MAGIC Another method for balancing the training dataset is with the use of we call the "Majority Class Splitting" technique, which is described in the paper "New Applications of Ensembles of Classifiers" by Barandela et. al (http://marmota.dlsi.uji.es/WebBIB/papers/2003/paa-2.pdf). Referring to the paper, this is a dataset balancing approach where instead of oversampling the minority class to balance the dataset (similar to what we did with SMOTE), we take an majority lass undersampling approach to get a data subset that is balanced between majority and minority classes. 
@@ -998,7 +985,7 @@ display(train_smoted.take(10))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Condiderations for Algorithm Exploration
+# MAGIC ### Considerations for Algorithm Exploration
 
 # COMMAND ----------
 
@@ -1170,6 +1157,13 @@ for algorithm in algorithms:
     tr_model = train_model(train_algo,algorithm,catFeatureNames,newnumFeatureNames,outcomeName,svmflag=False)
     PredictAndEvaluate(tr_model, val_algo, titleName, outcomeName)
 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## The Chosen Algorithm: Decision Trees
+# MAGIC * Things Navya said in presentation + diana's list
+# MAGIC * Extension of trees is RF & ensembles of ensembles of ...
 
 # COMMAND ----------
 
@@ -1517,15 +1511,6 @@ for maxDepth in [5, 10, 15]:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Training Ensemble with Smoted (Balanced) Training Dataset
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ### Training Ensemble with Majority Class Splitted (Balanced) Training Dataset
 
 # COMMAND ----------
@@ -1571,7 +1556,7 @@ for maxDepth in [5, 10, 15]:
 
 # COMMAND ----------
 
-def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
+def PreprocessForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
   target       = ["Dep_Del30"]
   #all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
   all_features = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
@@ -1595,7 +1580,7 @@ def TransformDataForEnsemble(mini_train_data, train_data, val_data, test_data, t
   return all_features, featureIndexer, featureIndexer_smorted, tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted
 
 
-all_ensemble_features, ensemble_featureIndexer, ensemble_featureIndexer_smoted, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test, ensemble_train_smoted = TransformDataForEnsemble(mini_train, train, val, test, train_smoted)
+all_ensemble_features, ensemble_featureIndexer, ensemble_featureIndexer_smoted, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test, ensemble_train_smoted = PreprocessForEnsemble(mini_train, train, val, test, train_smoted)
 
 print(all_ensemble_features)
 ensemble_mini_train.show(2)
@@ -1655,7 +1640,7 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC Below we see that we have a perfect set of 10 balanced datasets. We will use this for our further training. We also examine the smoted data and check the balancing as well.
+# MAGIC Below we see that we have a set of 10 balanced datasets. We will use this for our further training. Below, we also examine the smoted data and check the balancing as well.
 
 # COMMAND ----------
 
@@ -1790,7 +1775,7 @@ fig.show()
 # MAGIC %md 
 # MAGIC #### Construct a new data set based on the output of base classifiers
 # MAGIC 
-# MAGIC Do inference on first level classifiers. using the remaining balanced dataset. Collect the predictions. Use these predictions as features for level to voting model.
+# MAGIC Do inference on first level classifiers, using the remaining balanced dataset. Collect the predictions. Use these predictions as features for level two voting model.
 
 # COMMAND ----------
 
@@ -1803,7 +1788,9 @@ def do_ensemble_prediction(em, train_en) :
         )      
         prediction_array.append(predictions
                                 .select(F.col("prediction").alias("prediction_" + str(num)))
-                                .withColumn('ROW_ID', F.monotonically_increasing_id())
+                                # Create a monotonically increasing row id with each data frame 
+                                # so that we can do recursive join based on the row ID.
+                                .withColumn('ROW_ID', F.monotonically_increasing_id()) 
         )
     return prediction_array
 
@@ -1824,6 +1811,8 @@ ensemble_prediction = do_ensemble_prediction(ensemble_model, train_combiner)
 from functools import reduce
 
 def assemble_dataframe(prediction_array) :
+    # Do a reduction operation using functional programming concepts, iterate over array and generate
+    # a dataframe towrds end.
     def do_reduce(df1, df2): return df1.join(df2, "ROW_ID")
     return reduce(do_reduce, prediction_array).drop("ROW_ID")
 
@@ -1892,6 +1881,7 @@ model_trained_ensemble_rf = TrainCombiner(ensemble_transformed, ensemble_feature
 
 # COMMAND ----------
 
+# Create checkpoint
 if False : 
   model_trained_ensemble_lr.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr.v1.model")
   model_trained_ensemble_svm.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm.v1.model")
@@ -1909,6 +1899,8 @@ if False :
 
 # COMMAND ----------
 
+# recursively call each of the functions described above to transform the model objects we give as agruments. 
+# This is the final model pipeline.
 def FinalEnsmblePipeline(model_comb, model_group, data) :
   return model_comb.transform(
     do_transform_final(
@@ -1976,14 +1968,25 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Run the same steps with smorted data
+# MAGIC ### Training Ensemble with SMOTEd (Balanced) Training Dataset
 
 # COMMAND ----------
 
-# Train first-level classifiers using random forest.
+# MAGIC %md
+# MAGIC #### Run the model training steps with SMOTEd data
+
+# COMMAND ----------
+
+# Train first-level classifiers using random forest, store the resulting model array.
 ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_featureIndexer_smoted, 
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
                    )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC Visualize the feature importance for each model in ensemble array, for the smorted data
 
 # COMMAND ----------
 
@@ -2027,6 +2030,7 @@ fig.show()
 
 # COMMAND ----------
 
+# Checkpoint the smoted ensemble model 
 if False : 
   for i, model in enumerate(ensemble_model_smoted):
     model.save("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) +  ".v2.model")
@@ -2068,10 +2072,16 @@ model_trained_ensemble_rf_smoted = TrainCombiner(ensemble_transformed_smoted, en
 
 # COMMAND ----------
 
+# Save and checkpoint the models
 if False : 
   model_trained_ensemble_lr_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v2.model")
   model_trained_ensemble_svm_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_svm_smoted.v2.model")
   model_trained_ensemble_rf_smoted.save("dbfs:/user/team20/finalnotebook/model_trained_ensemble_rf_smoted.v2.model")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Visualize the model importance of stage 2 learning algorithm
 
 # COMMAND ----------
 
@@ -2130,6 +2140,7 @@ fig.show()
 
 # COMMAND ----------
 
+# Reload voting model from checkpoints
 print("Loading model_trained_ensemble_lr_smoted.v2.model")
 model_trained_ensemble_lr_smoted_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v2.model")
 print("Loading model_trained_ensemble_svm_smoted.v2.model")
@@ -2145,6 +2156,7 @@ model_trained_ensemble_rf_load = pl.PipelineModel.load("dbfs:/user/team20/finaln
 
 # COMMAND ----------
 
+# Reload ensemble model from checkpoints
 ensemble_model_load = []
 for i in range(0,9) :
   print("Loading ensemble_model " + str(i))
@@ -2152,12 +2164,15 @@ for i in range(0,9) :
 
 # COMMAND ----------
 
+# Reload smoted ensemble model from checkpoints
 ensemble_model_smoted_load = []
 for i in range(0,9) :
   print("Loading ensemble_model " + str(i))
   ensemble_model_smoted_load.append(pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/ensemble_model_smoted" + str(i) + ".v2.model"))
 
 # COMMAND ----------
+
+# Reload test and validation data from checkpoints
 
 print("Loading ensemble_test.v1.parquet")
 ensemble_test_load = spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
@@ -2166,6 +2181,7 @@ ensemble_val_load = spark.read.option("header", "true").parquet("dbfs:/user/team
 
 # COMMAND ----------
 
+# Run the evaluation metrics after prediction. Use the model trained with regular (non smote-d) data for  prediction
 model_eval_smoted = []
 for (l2_name, l2_model, l1_model)  in [
   ("LR-smoted", model_trained_ensemble_lr_smoted_load, ensemble_model_smoted_load), 
@@ -2174,8 +2190,10 @@ for (l2_name, l2_model, l1_model)  in [
 ] :
   for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
-      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
-      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data) # Run prediction using the "FinalEnsmblePipeline"
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True) # Run the evaluation function 
+      
+      # Collect the evaluation metrics.
       model_eval_smoted.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
 
 # COMMAND ----------
@@ -2218,6 +2236,8 @@ fig.show()
 
 # COMMAND ----------
 
+# Run the evaluation metrics after prediction. Use the model trained with smote-d data for  prediction
+
 model_eval_regular = []
 for (l2_name, l2_model, l1_model)  in [
   ("LR", model_trained_ensemble_lr_load, ensemble_model_load), 
@@ -2226,8 +2246,10 @@ for (l2_name, l2_model, l1_model)  in [
 ] :
   for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
       print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
-      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data)
-      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data) # Run prediction using the "FinalEnsmblePipeline"
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True)  # Run the evaluation function
+      
+      # Collect the evaluation metrics.
       model_eval_regular.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
       
 
@@ -2309,29 +2331,25 @@ fig.show()
 
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
-# MAGIC - Bias-variance tradeoff (in dataset balancing discussion)        
+# MAGIC ### Bias-variance tradeoff (in dataset balancing discussion)        
 # MAGIC   Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. (Did we do this or was it future?)
 # MAGIC        
-# MAGIC - Breiman's Theorem (for ordering categorical variables)           
+# MAGIC ### Breiman's Theorem (for ordering categorical variables)           
 # MAGIC   We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. *Op_Unique_Carrier, 'Origin', 'Dest'*  and for the following interacted features *'Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week' 'Arr_Time_Of_Week', 'Holiday'*. For example, if you consider the feature *Op_Unique_Carrier* it had 19 unique categories. Using Breiman's method the potential 524288 splits were reduced to 18 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like *Origin-Dest* and *Day_Of_Year* where the number of categories were much larger.
 # MAGIC 
-# MAGIC - how data is stored on cluster - parquet
+# MAGIC ### Data storage on cluster - parquet
 # MAGIC   The original airlines dataset has roughly 31 million records and 54 fields.  While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format in originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman..etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
 # MAGIC 
-# MAGIC - Scalability & sampling (for SMOTE)
+# MAGIC ### Scalability & sampling (for SMOTE)
 # MAGIC   Given the minority class records were around 2 million we decided to use SMOTE to create a more balanced set.  We had scalability challenges in implementing the KNN algorithm. Trying to create K nearest neighbors for 2M samples doesn’t scale well as we have to store all of these samples in memory for broadcast. To address this challenge we used only a small sample of the minority class which fit the memory well.  The second approach was to create 1000 clusters of minority samples using the K-Means algorithm and run the KNN algorithm in parallel to generate synthetic data.  The second approach is much more scalable (2.5 hrs Vs 24+hrs) and took much less time. It also yielded a synthetic sample closer to the distribution of the original data.
+# MAGIC   - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
 # MAGIC 
-# MAGIC - broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
+# MAGIC ### Broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
 # MAGIC   Broadcast variables allow the programmer to keep a read-only variable cached on each machine rather than shipping a copy of it with tasks. In this project we needed to join tables in multiple cases. By using the Broadcast variable, we implemented a map-side join, which is much faster than reduce side join, as there is no shuffle-which is more expensive.  “Brodcast +  sidejoin” were used to implement the addition of holiday feature, Aggregated Origin-Activity, Breiman ranks and to create a balanced airline dataset using SMOTE .
 # MAGIC 
-# MAGIC 
-# MAGIC - 1-hot encoding for SVM's?        
-# MAGIC   While using Support Vector Machines classifier, it had to deal with categorical features. There were two ways we could have accomplished this. First way is the use of integer codes which assumes that there is a certain order/ranking for these categorical features. And the second way is using one-hot encoding. One hot encoding is used when the categorical features don't have any particular order. In our case, the selected categorical features themselves didn't have any natural ordering so we adopted to one hot-encoding.
 # MAGIC   
-# MAGIC - assumptions (for different algorithms - for example OLS vs Trees)        
+# MAGIC ### Assumptions (for different algorithms - for example OLS vs Trees) (Remove?)
 # MAGIC   During algorithm exploration we selected a set of variety of algorithms to pick the most suitable one for this particular airline dataset. The algorithms like logistic regression and Naive Bayes tend me very simple in its modeling. These simple models relatively insensitive to variance to different training datasets. But they tend to be highly biased. This problem seem to compound when the data is imbalanced. Algorithms like decision trees and support vector machines are much more complex and as we increase complexity they tend to less and less biased but has a tendency to show a lot of variance between training sets. In other words they seem to overfit to the given training set. In our case we chose the complex model which overfits and used additional methods like random forest, ensembles and hyper paramter tuning to reduce the overfitting of the model.
-# MAGIC   
-# MAGIC - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
 
 # COMMAND ----------
 
