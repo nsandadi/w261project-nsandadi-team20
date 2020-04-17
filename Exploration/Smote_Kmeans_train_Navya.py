@@ -9,6 +9,7 @@ airlines = spark.read.option("header", "true").parquet(f"dbfs:/mnt/mids-w261/dat
 
 # COMMAND ----------
 
+# Check number of records
 print("Number of rows in original dataset:", airlines.count())
 
 # COMMAND ----------
@@ -114,7 +115,7 @@ display(train.groupby('DEP_DEL30').count())
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Vectorize the train dataset
+# MAGIC ### Vectorize the training dataset
 
 # COMMAND ----------
 
@@ -122,10 +123,6 @@ display(train.groupby('DEP_DEL30').count())
 indexers = [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in catFeatureNames]
 pipeline = Pipeline(stages=indexers)
 indexed = pipeline.fit(train).transform(train)
-
-# COMMAND ----------
-
-display(indexed.take(5))
 
 # COMMAND ----------
 
@@ -142,30 +139,16 @@ vectorized = pos_vectorized.select('features', outcomeName).withColumn('label',p
 
 # COMMAND ----------
 
-display(pos_vectorized.take(1))
-
-# COMMAND ----------
-
-vectorized.take(5)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### Filter the minority data set and convert into feature vector
 
 # COMMAND ----------
 
+# Filter the minority data
 minority_data = vectorized[vectorized.label == 1]
-minority_data.take(10)
 
-# COMMAND ----------
-
-minority_data.count()
-
-# COMMAND ----------
-
+# Select the feature vectors of minority data
 featureVect = minority_data.select('features')
-featureVect.take(5)
 
 # COMMAND ----------
 
@@ -176,35 +159,26 @@ featureVect.take(5)
 
 from pyspark.ml.clustering import KMeans
 
-# Trains a k-means model.
-kmeans = KMeans().setK(500).setSeed(1)
+# Train a k-means model on minority feature vectors
+kmeans = KMeans().setK(1000).setSeed(1)
 model = kmeans.fit(featureVect)
-
-# Evaluate clustering by computing Within Set Sum of Squared Errors.
-# wssse = model.computeCost(vect_mini_train)
-# print("Within Set Sum of Squared Errors = " + str(wssse))
-
-# Shows the result.
-centers = model.clusterCenters()
-# print("Cluster Centers: ")
-# for center in centers:
-#     print(center)
-
-# COMMAND ----------
-
 predict = model.transform(featureVect)
 
+
 # COMMAND ----------
 
+# Check the average number of data points in each cluster
 display(predict.groupBy('prediction').count().orderBy('prediction'))
 
 # COMMAND ----------
 
+# Re-order the columns in the dataframe
 predict = predict.select(['prediction','features'])
 predict.show(10)
 
 # COMMAND ----------
 
+# Check the number of records
 predict.count()
 
 # COMMAND ----------
@@ -257,10 +231,6 @@ smote_rdd = predict.rdd.map(lambda x: (x[0], [list(x[1])])) \
 
 # COMMAND ----------
 
-# print("Partitions structure: {}".format(smote_rdd.glom().collect()))=
-
-# COMMAND ----------
-
 # Convert the synthetic data into a dataframe
 augmentedData_DF = smote_rdd.toDF()     
 
@@ -274,10 +244,6 @@ smote_data = vectorized.unionAll(augmentedData_DF)
 
 # EDA of data balance after applying SMOTE
 display(smote_data.groupBy('label').count())
-
-# COMMAND ----------
-
-smote_data.take(10)
 
 # COMMAND ----------
 
@@ -373,6 +339,7 @@ smoted_train_cols_dest = smoted_train_cols_dest.drop('DEST_idx')
 # COMMAND ----------
 
 # Perform an action as the transformations are lazily evaluated 
+# Check the number of records in smoted dataset
 smoted_train_cols_dest.count()
 
 # COMMAND ----------
@@ -392,7 +359,7 @@ def WriteAndRefDataToParquet(data, dataName):
 
 # COMMAND ----------
 
-smoted_train_kmeans_500 = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smoted_train_kmeans_500')
+smoted_train_kmeans = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smoted_train_kmeans')
 
 # COMMAND ----------
 
@@ -402,15 +369,7 @@ smoted_train_kmeans_500 = WriteAndRefDataToParquet(smoted_train_cols_dest, 'smot
 # COMMAND ----------
 
 # Load the data into dataframe
-smoted_train_kmeans_500 = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_smoted_train_kmeans_500.parquet")
-
-# COMMAND ----------
-
-display(smoted_train_kmeans_500.take(10))
-
-# COMMAND ----------
-
-smoted_train_kmeans_500.count()
+smoted_train_kmeans = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_smoted_train_kmeans.parquet")
 
 # COMMAND ----------
 
@@ -433,12 +392,13 @@ display(smoted_train_kmeans_500.groupby('DEP_DEL30').count())
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Filtering out delayed data within train and smoted_train to observe the distribution of data
+# MAGIC #### Filtering out delayed data within train and smoted_train & plot graphs to observe the distribution of data
 
 # COMMAND ----------
 
+# Filter only delayed data
 train_delay = train.filter(train.DEP_DEL30 == 1)
-smoted_train_kmeans_500_delay = smoted_train_kmeans_500.filter(smoted_train_kmeans_500.DEP_DEL30 == 1)
+smoted_train_kmeans_delay = smoted_train_kmeans.filter(smoted_train_kmeans.DEP_DEL30 == 1)
 
 
 # COMMAND ----------
@@ -452,7 +412,7 @@ display(train_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARR
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARRIER'))
+display(smoted_train_kmeans_delay.groupby('OP_UNIQUE_CARRIER').count().orderBy('OP_UNIQUE_CARRIER'))
 
 # COMMAND ----------
 
@@ -465,7 +425,7 @@ display(train_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
+display(smoted_train_kmeans_delay.groupby('ORIGIN').count().orderBy('ORIGIN'))
 
 # COMMAND ----------
 
@@ -478,7 +438,7 @@ display(train_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('DEST').count().orderBy('DEST'))
+display(smoted_train_kmeans_delay.groupby('DEST').count().orderBy('DEST'))
 
 # COMMAND ----------
 
@@ -491,7 +451,7 @@ display(train_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
+display(smoted_train_kmeans_delay.groupby('DISTANCE_GROUP').count().orderBy('DISTANCE_GROUP'))
 
 # COMMAND ----------
 
@@ -504,7 +464,7 @@ display(train_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
+display(smoted_train_kmeans_delay.groupby('DISTANCE').count().orderBy('DISTANCE'))
 
 # COMMAND ----------
 
@@ -517,7 +477,7 @@ display(train_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('YEAR').count().orderBy('YEAR'))
+display(smoted_train_kmeans_delay.groupby('YEAR').count().orderBy('YEAR'))
 
 # COMMAND ----------
 
@@ -530,7 +490,7 @@ display(train_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('MONTH').count().orderBy('MONTH'))
+display(smoted_train_kmeans_delay.groupby('MONTH').count().orderBy('MONTH'))
 
 # COMMAND ----------
 
@@ -543,7 +503,7 @@ display(train_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
+display(smoted_train_kmeans_delay.groupby('DAY_OF_MONTH').count().orderBy('DAY_OF_MONTH'))
 
 # COMMAND ----------
 
@@ -556,4 +516,4 @@ display(train_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
 
 # COMMAND ----------
 
-display(smoted_train_kmeans_500_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
+display(smoted_train_kmeans_delay.groupby('DAY_OF_WEEK').count().orderBy('DAY_OF_WEEK'))
