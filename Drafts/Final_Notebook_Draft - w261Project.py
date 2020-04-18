@@ -268,7 +268,7 @@ fig = MakeRegBarChart(d, outcomeName, var + "_binlabel", orderBy=var + "_binlabe
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC By doing this kind of binning, we can see that the same general shape of the distribution is preserved, albeit at a coarser level, which removes some of the extra information that was present in the original variable. But doing this kind of aggregation has its benefits when it comes to modeling. 
+# MAGIC By doing this kind of binning, we can see that the same general shape of the distribution is preserved, albeit at a coarser level, which removes some of the extra information that was present in the original variable. But doing this kind of aggregation has its benefits in terms of reducing the noise from the signal when it comes to modeling. 
 # MAGIC 
 # MAGIC In the case of Logistic Regression, if we had referred to the original `CRS_Elapsed_Time`, we would estimate a single coefficient for the variable, which would tell us the effect that adding 1 minute to the elapsed time would have on the probability that a flight is delayed. However, if we were to bin this variable and treat the result as a categorical variable in our regression, the model would estimate a coefficient for all but one of the bins, which would tell us more detailed information about the effect of a flight having a certain kind of duration (e.g. 1-2 hours). By comparison to the coefficient we'd estimate on the raw `CRS_Elapsed_Time`, this would be a much more meaningful estimate to use to understand the underlying factors for departure delays. This will require the algorithm to have to learn more coefficients than if the original `CRS_Elapsed_Time` were to be used, but to answer our core question, it seems to be a worthwhile cost if we proceed with Logistic Regression as our model of choice.
 # MAGIC 
@@ -340,7 +340,7 @@ fig = MakeProbBarChart(airlines, "Op_Unique_Carrier", xtype='category', numDecim
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC By ordering the airline carriers by this average outcome (`Prob_Dep_Del30`), we can not only begin to compare the airlies (Alaska Airlines seems to be better than Delta Airlines by a small margin), but we can actually strongly reduce the number of splits to consider from 262,143 possible splits to just 18 for `Op_Unique_Carrier` when it comes to the Decision Tree algorithm. Even further, if we assign numerical ranks, we have the potential to convert this categorical feature into a numerical feature (by assigning 1 to the highest ranked airline, 'HA' (Hawaiian Airlines), and 19 to the lowest ranked airline 'B6' (Jet Blue)), which helps to reduce the workload for both Logistic Regression and Support Vector Machines. 
+# MAGIC By ordering the airline carriers by this average outcome (`Prob_Dep_Del30`), we can not only begin to compare the airlines (Alaska Airlines seems to be better than Delta Airlines by a small margin), but we can significantly reduce the number of splits to consider, from 262,143 possible splits to just 18 for `Op_Unique_Carrier` when it comes to the Decision Tree algorithm. Even further, if we assign numerical ranks, we have the potential to convert this categorical feature into a numerical feature (by assigning 1 to the highest ranked airline, 'HA' (Hawaiian Airlines), and 19 to the lowest ranked airline 'B6' (Jet Blue)), which helps to reduce the workload for both Logistic Regression and Support Vector Machines. 
 # MAGIC 
 # MAGIC This data transformation essentially describes the application of Breiman's Theorem, which we can apply to all our categorical features, even the ones we feature engineer. Note that any ranking we generate for our categorical features will need to be generated based on our training set and separately applied to the test set, to ensure the ranking isn't in any way influenced by the data in our test set. We will proceed to apply this to all our categorical features in section III. 
 
@@ -1249,11 +1249,11 @@ display(toy_dataset)
 # MAGIC %md
 # MAGIC ### Training Decision Tree on SMOTEd (Balanced) Training Dataset
 # MAGIC 
-# MAGIC For our first step towards modeling departure delays, we trained a decision tree model using all the feature engineering described in prior sections on the SMOTEd (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on CRS Departure Time and the threshold chosen is 1200 (or noon). Thus, we can infer that a departure time before or after noon along with Origin can give us information about a departure delay. 
+# MAGIC For our first step towards modeling departure delays, we trained a decision tree model using all the feature engineering described in prior sections on the SMOTEd (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose `CRS_Dep_Time_bin` as the most important feature to split on first, followed by `Origin_Activity` and `Origin_Dest_brieman`. `Distance` and `Carrier` are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on `CRS_Dep_Time_bin` and the threshold chosen is 115.5 (note that the bin 115 corresponds to the 10-minute block 1150, which is approximately noon). Thus, we can infer that a departure time approximately before or after noon along with origin airport can give us information about a departure delay. 
 # MAGIC 
-# MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
+# MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Yet selecting too low a value for maxDepth will make the model underfit to the data. Thus, selecting the right maxDepth is important to build a good model.
 # MAGIC 
-# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 for our decision tree model. 
+# MAGIC For selecting the optimal hyperparameter value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 for our decision tree model. Note however that even for our model trained with maxDepth = 15, the model performs much better on the SMOTEd training data used for training, but less so on the original training data and the held-out validation set. In fact, we see fairy good performance across most all our metrics for the data used for training, but see a definite drop, especially in terms of precision, F-score, and Area Under PRC. These outcomes do seem to suggest that the single decision tree likely overfit to the training data.
 
 # COMMAND ----------
 
@@ -1351,16 +1351,16 @@ def PrintDecisionTreeModel(model, featureNames):
 
 # COMMAND ----------
 
+# Prep features to use for decision tree model
 featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
 va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
 
-# COMMAND ----------
-
+# Train, evaluate, & display the model
 dt_model = TrainDecisionTreeModel(train_smoted, [va_base], outcomeName, maxDepth=15, maxBins=200)
 PredictAndEvaluate(dt_model, train_smoted, 'train_smoted', outcomeName)
 PredictAndEvaluate(dt_model, train, 'train', outcomeName)
 PredictAndEvaluate(dt_model, val, 'val', outcomeName)
-PrintDecisionTreeModel(dt_model_0.stages[-1], featureNames)
+PrintDecisionTreeModel(dt_model.stages[-1], featureNames)
 
 # COMMAND ----------
 
@@ -1375,7 +1375,7 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC %md
 # MAGIC ### Training Random Forest on Smoted (Balanced) Training Dataset
 # MAGIC 
-# MAGIC Decision trees tend to result in overfitting because they memorize the training data. To overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
+# MAGIC Decision trees have a tendency to overfit because they memorize the training data. One way to overcome this limitation is to rpuTo overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
 # MAGIC 
 # MAGIC Randomization in a random forest generally applies to:
 # MAGIC - Random selection of samples from the training data (with replacement) from the original training data
