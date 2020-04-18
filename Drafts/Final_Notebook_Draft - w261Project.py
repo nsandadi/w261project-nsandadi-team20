@@ -790,7 +790,7 @@ print(" - Breiman Ranked Features: \t", briFeatureNames) # numerical features
 # MAGIC 
 # MAGIC We have provided an additional notebook with the full implementation of SMOTE for this project, which can be found here:
 # MAGIC 
-# MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/2791835342809045/revision/1587101612000
+# MAGIC https://dbc-b1c912e7-d804.cloud.databricks.com/?o=7564214546094626#notebook/2791835342809045/command/814519033153637
 
 # COMMAND ----------
 
@@ -1247,6 +1247,17 @@ display(toy_dataset)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Evaluating Models
+# MAGIC 
+# MAGIC Before going into training decision trees and analyzing the results they give, let us consider the evaluation metrics that we'll use to evaluate whether these models are "good" models.
+# MAGIC 
+# MAGIC As we noted in previous sections, while accuracy may be an intuitive metric for us to use to evaluate our model performance, it is not necessarily the best metric use. It's especially an issue if our dataset is imbalanced, because if we predict the majority class, 89% of the time, we'd be right. In which case, we'd have to concentrate on metrics that tell us the whole story like area under the curve & our confusion matrix.
+# MAGIC  
+# MAGIC However, since we'll focus on training our models on balanced datasets (using either SMOTE or Majority Class Splitting), accuracy becomes a more valid metric. With that said, we will still look at other metrics as well, including precision, recall, f-score, area under the curve (including AUROC and AUPRC), as well as the confusion matrix to ensure we get the full story of how our models perform. By having all the metrics, we can choose which metric to prioritize depending on the business case of interest. If we were to prioritize recall, for example, this would ensure a model that is great for helping airlines and airports prepare for delays from a resource perspective. By comparison, if we were to prioritize precision, this would help passengers better plan for delays and not miss their flights. At the end of the day, it depends on what use case we want to prioritize and for these reasons, we'll evaluate all metrics in aggregate as we proceed through this section.
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Training Decision Tree on SMOTEd (Balanced) Training Dataset
 # MAGIC 
 # MAGIC For our first step towards modeling departure delays, we trained a decision tree model using all the feature engineering described in prior sections on the SMOTEd (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose `CRS_Dep_Time_bin` as the most important feature to split on first, followed by `Origin_Activity` and `Origin_Dest_brieman`. `Distance` and `Carrier` are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on `CRS_Dep_Time_bin` and the threshold chosen is 115.5 (note that the bin 115 corresponds to the 10-minute block 1150, which is approximately noon). Thus, we can infer that a departure time approximately before or after noon along with origin airport can give us information about a departure delay. 
@@ -1257,7 +1268,7 @@ display(toy_dataset)
 
 # COMMAND ----------
 
-# DBTITLE 1,Helper Code to Load All Data for Model Training (TODO: remove)
+# DBTITLE 1,Helper Code to Load All Data for Model Training
 # Read prepared data from parquet for training
 def ReadDataFromParquet(dataName):
   # Read data back directly from disk 
@@ -1375,13 +1386,13 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC %md
 # MAGIC ### Training Random Forest on Smoted (Balanced) Training Dataset
 # MAGIC 
-# MAGIC Decision trees have a tendency to overfit because they memorize the training data. One way to overcome this limitation is to rpuTo overcome this limitation, the tree can be pruned. Another approach is to build a Random Forest (i.e), a forest of random decision trees. Multiple trees are generated and the results are aggregated as an average of the subresults given by the decision trees. Random forests tend to perform better than decision trees because they can generalize easily. However, random forests have a loss of interpretability compared to decision trees.
+# MAGIC Decision trees have a tendency to overfit because they memorize the training data. One way to overcome this limitation is to prune the tree to help it generalize better. Another approach is to build a Random Forest (i.e), a forest of random decision trees, where the "randomness" comes from the random subset of features (without replacement) and observations (with replacement) given to each tree to consider. Multiple trees are generated through the random forest training, where each tree is trained on their own subset of data and features. 
 # MAGIC 
-# MAGIC Randomization in a random forest generally applies to:
-# MAGIC - Random selection of samples from the training data (with replacement) from the original training data
-# MAGIC - Random selection of a subset of features
+# MAGIC At inference time, the inference on a single data point involves taking the results or "votes" from each tree on the classification for that data point and aggregating them as an average of results to be the final prediction given by the random forest. Random forests tend to perform better than decision trees because they can generalize more easily. However, random forests have a bit of a loss in terms of interpretability compared to decision trees, as the decision making becomes a bit more distributed and requires aggregation. Having said that, we can still plot a ranking of feature importances for a random forest to understand which features are given most/least importance. 
 # MAGIC 
-# MAGIC We plot feature importance below for the random forest model to understand which features are given most/least importance. Origin Activity and CRS Departure Time are given the most importance. From this, we can generally infer that origin along with the time of the day can give us important information about predicting a departure delay.
+# MAGIC Below, we train and evaluate a simple random forest model, and rank the importance of each of our considered features, as shown in the barplot below. From this plot, we can see that `CRS_Dep_Time_bin` and `Origin_Activity` are given the highest importance by the full random forest model, meaning that these features gave some of the highest information gain among all the trees in the random forest model. Following this, we see `CRS_Arr_Time_bin`, `Origin_Dest_brieman`, and `Day_Of_Week` are next in importance, with features relating to the time of year, the elapsed time, and the distance traveled being less imortant. From this, we can generally infer that infromation about the origin airport along with the time of the day and the day of the week the flight is scheduled to take off and arrive can give us important information about predicting a departure delay.
+# MAGIC 
+# MAGIC With regard to performance on this single random forest model, we see a similar story to the decision tree. That is to say, the model performs quite well on the SMOTEd training data, but seems to fall short in performance on the original training and validation data, although not quite as severely as that seen with the decision tree, suggesting that the random forest algorithm may have helped reduce the amount of overfitting seen in the tree (though some overfitting is still present).
 
 # COMMAND ----------
 
@@ -1404,8 +1415,6 @@ PredictAndEvaluate(rf_model, val, 'val', outcomeName)
 # COMMAND ----------
 
 # Plot feature importance of the random forest model
-import plotly.graph_objects as go
-
 rf_importances =list(rf_model.stages[-1].featureImportances.toArray())
 fig = go.Figure([go.Bar(x=featureNames, y=rf_importances)]) 
 fig.update_layout(title_text='Feature Importances in Random Forest Model', xaxis={'categoryorder':'total descending'}, xaxis_tickangle=-45)
@@ -1413,11 +1422,10 @@ fig.update_yaxes(title_text="Feature Importance")
 fig.update_xaxes(title_text="Features")
 fig.show()
 
-
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC For hyper-parameter tuning, we used the following parameters: 
+# MAGIC For hyper-parameter tuning our random forest model, we considered the following parameters: 
 # MAGIC - numTrees: 
 # MAGIC  > - Represents the number of trees in the forest.
 # MAGIC  > - More trees reduce overfitting but takes longer to train. 
@@ -1428,13 +1436,7 @@ fig.show()
 # MAGIC  > - The deeper the tree, the more splits it has and it captures more information about the data but leads to overfitting, as discussed above. 
 # MAGIC  > - Values used are 5, 10, 15.
 # MAGIC 
-# MAGIC After performing parameter optimization on the random forest, we found that the random forest classifier with 100 trees and maxDepth of 15 performed best with metrics as follows:
-# MAGIC - Accuracy of 0.67, 
-# MAGIC - Precision of 0.17, 
-# MAGIC - Recall of 0.51,
-# MAGIC - AUROC of 0.65.
-# MAGIC 
-# MAGIC As expected, performance of the random forest model is better than a single decision tree. To improve the performance further, we try an ensemble of random forests (i.e.), forest of forests, as our next approach.
+# MAGIC The experiments we ran for our random forest model are shown below:
 
 # COMMAND ----------
 
@@ -1455,12 +1457,24 @@ for maxDepth in [5, 10, 15]:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Training Ensemble with Majority Class Splitted (Balanced) Training Dataset
+# MAGIC After performing parameter optimization on the random forest, we found that the random forest classifier with 100 trees and maxDepth of 15 performed best with metrics as follows:
+# MAGIC - Accuracy of 0.67, 
+# MAGIC - Precision of 0.17, 
+# MAGIC - Recall of 0.51,
+# MAGIC - AUROC of 0.65.
+# MAGIC 
+# MAGIC As expected, performance of the random forest model is better than the performance we generally saw on a single decision tree. But, to improve the performance further, we will try to generalize our models even moreso and try an ensemble of random forests (i.e. a forest of forests), as our next approach.
 
 # COMMAND ----------
 
-# MAGIC %md 
-# MAGIC Ensemble approach can be used to address the imbalanced training data problem. The approaches such as SMOTE has scalability issues and ensemble approach try to overcome practical issues. The negative effects of imbalance can be avoided with out replicating the minority class and with out discarding information from majority class. In this approach, individual components of the ensemble with a balanced learning sample. Working in this way, it is possible to appropriately handle the difficulties of the imbalance, while avoiding the drawbacks inherent to the oversampling and undersampling techniques.
+# MAGIC %md
+# MAGIC ### Training Ensemble with Majority Class Splitted (Balanced) Training Dataset
+# MAGIC 
+# MAGIC When we considered constructing ensembles of random forests to try to better generalize our models, we took inspiration from a model design known as stacking, which attempts to train an ensemble of models on an unbalanced dataset. The stacking approach we referred to depended on balancing the dataset via the majority class splitting approach, which we described at a high-level in section III. For this reason, we will turn to using majority class splitting to balance our dataset in order to motivate the explanation behind constructing stacked models and then return to using our SMOTEd dataset in a similar stacking approach.
+# MAGIC 
+# MAGIC As we discussed previously, the majority class splitting approach involves simply the majority class into \\(N\\) parts and constructing \\(N\\) subsets of the majority class and combining them with the entire subset of the minority class, such that each data subset is balanced, contains the full minority class, and has a \\(\frac{1}{N}\\)th random sample of the majority class. Each of these datasets will be used to train a single model in the first stage of the ensemble. By taking this approach, we can still ensure the training data used for each model is balanced and in the process, we will not lose any information that might have been lost from simply undersampling the majority class, nor will the stage 1 models overfit to the minority class (which would have happened had we oversampled the minority class). 
+# MAGIC 
+# MAGIC In the diagram below, we depict how the distribution of the datasets are shared amongst the individual random forest models used in the first stage of the ensemble stacking approach. Note that in the example, we have three stage 1 models, yet the majority class is split into four parts. This fourth majority split will be reserved for the second stage of the ensemble.
 
 # COMMAND ----------
 
@@ -1478,7 +1492,7 @@ for maxDepth in [5, 10, 15]:
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC In stage2, we take the remaining balanced dataset and run inference on stage 1 models and collect their predictions. These predictions are the features for the  second level voting model and it is used to train that model.  The final model is an assembled pipeline of all these models and can be used for prediction and evaluation purposes. Hence, a stacked ensemble can use first level predictions and conditionally decide to weigh the input predictions of the voting model differently - giving a better performance. This approach works far better than a simple majority classifier or a weighted model. 
+# MAGIC In stage 2, we take the remaining balanced dataset and run inference on stage 1 models and collect their predictions. These predictions are the features for the  second level voting model and it is used to train that model.  The final model is an assembled pipeline of all these models and can be used for prediction and evaluation purposes. Hence, a stacked ensemble can use first level predictions and conditionally decide to weigh the input predictions of the voting model differently - giving a better performance. This approach works far better than a simple majority classifier or a weighted model. 
 
 # COMMAND ----------
 
@@ -1513,8 +1527,8 @@ def PreprocessForEnsemble(mini_train_data, train_data, val_data, test_data, trai
                                                   ensemble_pipeline.fit(test_data).transform(test_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
                                                   ensemble_pipeline.fit(train_smoted_data).transform(train_smoted_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))  
   featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train.union(tmp_val).union(tmp_test))
-  featureIndexer_smorted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train_smoted.union(tmp_val).union(tmp_test))
-  return all_features, featureIndexer, featureIndexer_smorted, tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted
+  featureIndexer_smoted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train_smoted.union(tmp_val).union(tmp_test))
+  return all_features, featureIndexer, featureIndexer_smoted, tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted
 
 
 all_ensemble_features, ensemble_featureIndexer, ensemble_featureIndexer_smoted, ensemble_mini_train, ensemble_train, ensemble_val, ensemble_test, ensemble_train_smoted = PreprocessForEnsemble(mini_train, train, val, test, train_smoted)
@@ -1666,8 +1680,7 @@ if False :
 # MAGIC %md
 # MAGIC #### Visualize feature importance for individual ensembles
 # MAGIC 
-# MAGIC Each feature's importance is the average of its importance across all trees in the ensemble. The importance vector is normalized to sum to 1.  
-# MAGIC Reference : https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/classification/RandomForestClassifier.scala
+# MAGIC Each feature's importance is the average of its importance across all trees in the ensemble. The importance vector is normalized to sum to 1, thus the bars represent the weight of each feature in the individual random forests. From the plots below, we see very similar distributions across all nine random forest models, which means that each of the models learned similar things from the data subsets they were provided. More specifically, we see that `Dep_Time_Of_Week`, `Day_Of_Year`, `Arr_Time_Of_Week`, and `Origin_Dest` were the most important features, which indicates that attributes relating to the departure/arrival time, time of week, time of year, and the origin airport are likely more important for prediction departure delays, especially compared to features like `CRS_Elapsed_Time`, distance, and holidays.
 
 # COMMAND ----------
 
@@ -1849,7 +1862,13 @@ def FinalEnsmblePipeline(model_comb, model_group, data) :
 # MAGIC %md 
 # MAGIC #### Plot Model weights of ensembles
 # MAGIC 
-# MAGIC Below shows, Logistic regression and SV gives equal importance to all level one modes as opposed to Random forest.
+# MAGIC Similar to plotting the feature importances, we can also attempt to plot "model importances" as considered by each of the three voting models we've explored. 
+# MAGIC 
+# MAGIC In the case of Logistic Regression, these metrics are the coefficients estimated for each of the individual random forest predictions. We ideally don't want to see any of these coefficients set to 0, as this indicates that the model is ignored and thus the subset of data is ignored. In this case, we see that all 9 of the models are pretty evenly considered. Note that for our Logistic Regression voting model, we chose to use L2 regularization, which allows the weights to get close to zero but not be set to zero (which would be a consequence of using L1 regularization so in this case, we prefer L2 regularization). In this case, we thankfully see that the models are fairly evenly considered by the voting model.
+# MAGIC 
+# MAGIC For SVM, the weights show correspond to the coefficients for the separating boundary in "model space" for our delay and no-delay cases. Like for Logistic Regression, we don't want to see any of these weights zeroed out, as that would indicate that the model and the data subset is ignored for training. In this case, we see that the SVM gives a similar distribution for the model importance, as was seen with Logistic Regression.
+# MAGIC 
+# MAGIC For Random Forests, the weights we see correspond directly to the feature importances we've shown previously for the individual random forests. In this case though, our "features" are our individual models. Like in the previous plots, these model importances are based on how much the models contributed to the information gain in the voting model, so the higher the importance, the more information gain provided by the individual tree. Once again, we see that all models are being considered, though some more than others (in this case, model 2 is the least).
 
 # COMMAND ----------
 
@@ -1903,14 +1922,11 @@ fig.show()
 
 # MAGIC %md
 # MAGIC ### Training Ensemble with SMOTEd (Balanced) Training Dataset
+# MAGIC Now that we've developed the stacking approach using the majority class splitting, we can easily extend this to our original SMOTEd dataset. This is showcased in the code below:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC #### Run the model training steps with SMOTEd data
-
-# COMMAND ----------
-
+# DBTITLE 1,Run the model training steps with SMOTEd data
 # Train first-level classifiers using random forest, store the resulting model array.
 ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_featureIndexer_smoted, 
                     RandomForestClassifier(featuresCol="indexedFeatures", maxBins=369, maxDepth=8, numTrees=50, impurity='gini')
@@ -1919,8 +1935,7 @@ ensemble_model_smoted = TrainEnsembleModels(train_group_smoted, ensemble_feature
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC 
-# MAGIC Visualize the feature importance for each model in ensemble array, for the smorted data
+# MAGIC Similar to how we did previously, we can visualize the feature importance provided by each individual random forest model, as shown in the following plots. From the plots below, we again see very similar feature importance distributions for all nine random forest models, which means that each of the individual models are once again learning similar things from their subsets of data. Specifically, we see that `Origin_Activity`, `CRS_Dep_Time`, `CRS_Arr_Time`, `Day_Of_Week`, and `Origin_Dest` are some of the most important features which indicates that using the SMOTEd dataset, the model appears to learn that departure/arrival time, day of week and the origin airports are likely the most indicative features for predicting departure delays.
 
 # COMMAND ----------
 
@@ -1961,6 +1976,11 @@ for key, value in plt.items() :
 fig.update_layout(height=1200, width=1200, title_text="Feature importance for individual ensembles (Smoted)")
 fig.update_layout(xaxis_tickangle=-45)
 fig.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Next, we will proceed to train three voting models for the second stage of stacking, which again includes Logistic Regression, SVM, and Random Forests. We will use the 9 models trained previously as our stage one models for the stacked ensemble. 
 
 # COMMAND ----------
 
@@ -2015,7 +2035,7 @@ if False :
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Visualize the model importance of stage 2 learning algorithm
+# MAGIC With the voting models trained, we can again evaluate how these voting models consider each of the individual random forest models. In the case of Logistic Regression and SVM, we see a fairly uniform distribution across all nine individual models, suggesting an event consideration of the entire smoted dataset, similar to what we saw before with majority class splitting. However, there's a stark difference when looking at the model importances for the Random Forest voting model. In this case, model 6 is highly prioritized over the other 8 models, leading to less of a priority given to models 7, 4, 3, 2, 5, and 8, which is slight concerning given that the data learned by these models may be ignored and may lead to a bias towards the data that belongs to model 6.
 
 # COMMAND ----------
 
@@ -2068,12 +2088,13 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Model evaluation
+# MAGIC ### Model Evaluation
 # MAGIC 
-# MAGIC Run model evaluation with test set and validation set.
+# MAGIC With the ensemble models for both dataset balancing techniques trained and evaluated at a high-level, we'll now examine the actual performance results of the models against both the validation and the held out test sets. We will consider all of the six performance metrics discussed previously, as well as the full confusion matrix to again understand the nuances of model performance. We'll look at the performance metrics for each of our three voting models and compare them accordingly. 
 
 # COMMAND ----------
 
+# DBTITLE 1,Load Check-pointed Models
 # Reload voting model from checkpoints
 print("Loading model_trained_ensemble_lr_smoted.v2.model")
 model_trained_ensemble_lr_smoted_load = pl.PipelineModel.load("dbfs:/user/team20/finalnotebook/model_trained_ensemble_lr_smoted.v2.model")
@@ -2106,6 +2127,7 @@ for i in range(0,9) :
 
 # COMMAND ----------
 
+# DBTITLE 1,Reload Data for Evaluation
 # Reload test and validation data from checkpoints
 print("Loading ensemble_test.v1.parquet")
 ensemble_test_load = spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
@@ -2114,61 +2136,7 @@ ensemble_val_load = spark.read.option("header", "true").parquet("dbfs:/user/team
 
 # COMMAND ----------
 
-# Run the evaluation metrics after prediction. Use the model trained with regular (non smote-d) data for  prediction
-model_eval_smoted = []
-for (l2_name, l2_model, l1_model)  in [
-  ("LR-smoted", model_trained_ensemble_lr_smoted_load, ensemble_model_smoted_load), 
-  ("SVM-smoted", model_trained_ensemble_svm_smoted_load, ensemble_model_smoted_load), 
-  ("RF-smoted", model_trained_ensemble_rf_smoted_load, ensemble_model_smoted_load),
-] :
-  for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
-      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
-      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data) # Run prediction using the "FinalEnsmblePipeline"
-      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True) # Run the evaluation function 
-      
-      # Collect the evaluation metrics.
-      model_eval_smoted.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
-
-# COMMAND ----------
-
-model_eval = model_eval_smoted
-headerColor  = 'lightgrey'
-rowEvenColor = 'lightgrey'
-rowOddColor  = 'white'
-
-fig = go.Figure(data=[go.Table(
-  header=dict(
-    values=['<b>Run type</b>','<b>Accuracy</b>','<b>Precision</b>','<b>Recall</b>','<b>f-score</b>', 
-            '<b>AUROC</b>', '<b>AUPRC</b>', '<b>TP</b>', '<b>TN</b>', '<b>FP</b>', '<b>FN</b>'],
-    line_color='darkslategray',
-    fill_color=headerColor,
-    align=['left','center'],
-    font=dict(color='black', size=13)
-  ),
-  cells=dict(
-    values=[
-      [ev['l2_name'] + '<br>(' + ev['data_name'] + ')' for ev in model_eval],
-      [ev['result']['Accuracy'] for ev in model_eval],
-      [ev['result']['Precision'] for ev in model_eval],
-      [ev['result']['Recall'] for ev in model_eval],
-      [ev['result']['f-score'] for ev in model_eval],
-      [ev['result']['areaUnderROC'] for ev in model_eval],
-      [ev['result']['AreaUnderPRC'] for ev in model_eval],
-      [ev['result']['metric']['TP'] for ev in model_eval],
-      [ev['result']['metric']['TN'] for ev in model_eval],
-      [ev['result']['metric']['FP'] for ev in model_eval],
-      [ev['result']['metric']['FN'] for ev in model_eval],
-    ],
-    line_color='darkslategray',
-    align = ['left'],
-    font = dict(color = 'darkslategray', size = 13)
-    ))
-])
-fig.update_layout(width=1400, height=600, title="Model evaluation results (smoted)")
-fig.show()
-
-# COMMAND ----------
-
+# DBTITLE 1,Evaluate Models Trained with Majority Class Splitted Data
 # Run the evaluation metrics after prediction. Use the model trained with non smote-d data for  prediction
 
 model_eval_regular = []
@@ -2226,8 +2194,70 @@ fig.show()
 
 # COMMAND ----------
 
+# DBTITLE 1,Evaluate Models Trained with SMOTEd Data
+# Run the evaluation metrics after prediction. Use the model trained with regular (non smote-d) data for  prediction
+model_eval_smoted = []
+for (l2_name, l2_model, l1_model)  in [
+  ("LR-smoted", model_trained_ensemble_lr_smoted_load, ensemble_model_smoted_load), 
+  ("SVM-smoted", model_trained_ensemble_svm_smoted_load, ensemble_model_smoted_load), 
+  ("RF-smoted", model_trained_ensemble_rf_smoted_load, ensemble_model_smoted_load),
+] :
+  for data_name, data in [("test set", ensemble_test_load), ("validation", ensemble_val_load)] :
+      print("Level 2 model type = {}, running on {}".format(l2_name,data_name))
+      ensemble_test_prediction = FinalEnsmblePipeline(l2_model, l1_model, data) # Run prediction using the "FinalEnsmblePipeline"
+      eval = EvaluateModelPredictions(ensemble_test_prediction, dataName=data_name, ReturnVal=True) # Run the evaluation function 
+      
+      # Collect the evaluation metrics.
+      model_eval_smoted.append({ 'l2_name' : l2_name, 'data_name' : data_name, 'result' : eval})
+
+# COMMAND ----------
+
+model_eval = model_eval_smoted
+headerColor  = 'lightgrey'
+rowEvenColor = 'lightgrey'
+rowOddColor  = 'white'
+
+fig = go.Figure(data=[go.Table(
+  header=dict(
+    values=['<b>Run type</b>','<b>Accuracy</b>','<b>Precision</b>','<b>Recall</b>','<b>f-score</b>', 
+            '<b>AUROC</b>', '<b>AUPRC</b>', '<b>TP</b>', '<b>TN</b>', '<b>FP</b>', '<b>FN</b>'],
+    line_color='darkslategray',
+    fill_color=headerColor,
+    align=['left','center'],
+    font=dict(color='black', size=13)
+  ),
+  cells=dict(
+    values=[
+      [ev['l2_name'] + '<br>(' + ev['data_name'] + ')' for ev in model_eval],
+      [ev['result']['Accuracy'] for ev in model_eval],
+      [ev['result']['Precision'] for ev in model_eval],
+      [ev['result']['Recall'] for ev in model_eval],
+      [ev['result']['f-score'] for ev in model_eval],
+      [ev['result']['areaUnderROC'] for ev in model_eval],
+      [ev['result']['AreaUnderPRC'] for ev in model_eval],
+      [ev['result']['metric']['TP'] for ev in model_eval],
+      [ev['result']['metric']['TN'] for ev in model_eval],
+      [ev['result']['metric']['FP'] for ev in model_eval],
+      [ev['result']['metric']['FN'] for ev in model_eval],
+    ],
+    line_color='darkslategray',
+    align = ['left'],
+    font = dict(color = 'darkslategray', size = 13)
+    ))
+])
+fig.update_layout(width=1400, height=600, title="Model evaluation results (smoted)")
+fig.show()
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC Compare feature importance between Majority class splitted Vs Smoted, side by side. The feature vector of each ensemble is averaged and normalized for smoted and non-smoted cases to generate below plots.
+# MAGIC In the tables shown above, we see the performance results for both dataset balancing approaches across the different voting models. One thing that we want to look for is consistency across both the validation and test sets, which is something that we see for most metrics, but there does appear to be a stark difference in most of the runs between the two data balancing methods. Accuracy seems to be consistently higher for majority class splitting and greater than 0.5 but both approaches have fairly decent AUROC. In some cases, recall seems to fair better for sMOTE, which is great if the airlines and airports are using this model to prepare for delays from a resource perspective, but the lower precision means people might be more likely to miss their flights if they rely on this model to predict departure delays. The f-score, which attempts to balance both precision and recall into one metric, seems to hover around the same 0.22 regardless of data balancing approaches or voting models, as does the AUPRC at around 0.12. 
+# MAGIC 
+# MAGIC One thing that stands out is the low accuracy on SVM and Random Forest voting models with SMOTEing, which appears to be due to the very high number of false positives, which indicates that the models are predicting a lot of the flights as delayed when they are not--this could be because we generated a lot of synthetic data for the minority class, some of which might have actually been similar to non-delayed flights. This is especially exemplified by the high recall of 1 and 0.92/0.98 for SVM and Random Forests respectively, which also have fairly small numbers of true negatives and false negatives. In fact, in the case of the SVM voting model, the model always predicted delay, which is the inverse of the problem we were worried about when it came to data balancing--if anything, SVM appears to have gotten fairly confused between delay and no delay flights. But it's important to note that the Logistic Regression voting model actually does fairly well and doesn't seem to fall into the trap of always predicting delays. It does seem to outperform the other voting models on many of the statistics we've considered, likey due to the fact that in the model's simplest form, it will just predict the average, which is essentially a majority vote among all the individual random forests. 
+# MAGIC 
+# MAGIC By comparison, the voting models that leveraged majority class splitted trees seem to more consistently perform well across all of the voting models considered. We do see that all three models generally have higher performance compared to the SMOTEd voting models, but Logistic Regression and SVM seems to be approximately tied across all metrics for the majority class splitted models in terms of performance on both validation and test sets. In general though, across both data balancing techniques, Logistic Regression seems to fare as better voting model; although, to know for sure, we would need to do proper cross validation and hyperparameter experimentation.
+# MAGIC 
+# MAGIC At the end of the day, it depends on what your priorities are and who is going to use this model. But, while the metrics might not be perfect, our core question really had two sides to it--we want to have decent performance but also explain what is going on to help us try to find a solution to the problem. With that, we will once again explore the feature importances in a side by side comparison for the two data balancing approaches, which are shown below:
 
 # COMMAND ----------
 
@@ -2260,50 +2290,61 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC At first glance, these plots appear to tell us that the random forests trained on SMOTEd data and Majority Class Splitted data seemed to have learned something different. In the Majority Class Splitted case, we see that `Dep_Time_Of_Week` has the highest importance and for SMOTEd data, `Origin_Activity` ranks the highest, and the features that follow for both are different. But we need to remember something about decision trees in general--they have the ability to build their own interaction terms. In this case, `Dep_Time_Of_Week` in the majority class splitted models is the cross of `Dep_Time` & `Day_Of_Week`, which are highly ranked in the SMOTEd Models; same goes for `Day_Of_Year` as the interaction of `Month` and `Day_Of_Month`. Though the plots may look different, this is an artifact of the feature engineering we did. In reality, both kinds of ensembles tells us a similar story. Features relating to the origin airport and the traffic at it, the scheduled departure time (both time and day of week), as well as the time of year seem to be important indicators, whereas the length of the flight (both in terms of elapsed time and distance) and the airline carriers are less so. For airlines and airports, this can give useful information about where they can fundamentally make changes to the infrastructure to try to reduce delays and help address the underlying problems that lead to departure delays.
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## VI. Conclusions
-# MAGIC * Visualize Model Scores:
-# MAGIC     - Confusion Matrix!!
-# MAGIC     - precision-recall curve?
+# MAGIC 
+# MAGIC As we draw to a close in this investigation, we want to revisit the question we posed at the start of this analysis: **Given known information prior to a flight's departure, can we predict departure delays and identify the likely causes of such delays?** Throughout this analysis, we've explored a variety of models and settled on decision trees as the fundamental algorithm to help answer this question. After experiment with decision trees and extending to random forests and stacked ensembles of random forests, we came to develop models that could predict departure delays, given information known 6 hours prior to the scheduled departure time. Depending on the data balancing techniques we used, as well as the voting models we chose, the models were able to perform well across metrics such as accuracy, recall, area under ROC, especially considering the high-degree of imbalance present in the original dataset. But we were also able to identify the likely causes of delays, which gave us consistent information regardless of the data balancing techniques used. Namely, features relating to the departure time, day of the week, time of the year, as well as the origin airport and traffic at it were very good indicators of departure delays, suggesting that these features may be able to explain the causes of such delays. This gives airlines and airports the ability to act on this information and potentially make fundamental changes to infrastructure to reduce the departure delays.
+# MAGIC 
+# MAGIC From an exploration perspective, scalability challenges were present every step of the way, whether it was with SMOTEing our dataset, training our ensembles, or anticipating challenges with our feature engineering approaches. Due to limitations on our computational capacity, we did have to approximate SMOTE with K-means and we were limited in the amount of experimentation we could do with our ensembles. For the future, we'd look to trying out more data balancing approaches and comparing them to what we've already tried, as well as bringing in some more datasets to help introduce more features, such as weather data.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
-# MAGIC ### Bias-variance tradeoff (in dataset balancing discussion)        
-# MAGIC Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. Some limited hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. Due to resource limitations we couldn't run GridsearchCV.
+# MAGIC ### Bias-variance tradeoff     
+# MAGIC Bias variance tradeoff came up throughout the project at different places. During Algorithm Exploration we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The Logistic Regression and Naive Bayes belonged to the former category while Decision Tree and Support Vector Machines belonged to the latter. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. To reduce the over-fitting and high variance, we used random forests and ensembles of random forests to help generalize the models to the scenario. Some limited hyperparameter tuning using random forests helped us to get closer to a solution that balanced both bias and variance.
 # MAGIC        
-# MAGIC ### Breiman's Theorem (for ordering categorical variables)           
-# MAGIC We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. `Op_Unique_Carrier`, `Origin`, `Dest` and for the following interacted features `Day_Of_Year`, `Origin_Dest`, `Dep_Time_Of_Week`, `Arr_Time_Of_Week`, `Holiday`. For example, if you consider the feature `Op_Unique_Carrier` it had 19 unique categories. Using Breiman's method the potential 524288 splits were reduced to 18 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like `Origin_Dest` and `Day_Of_Year` where the number of categories were much larger.
+# MAGIC ### Breiman's Theorem       
+# MAGIC We applied Breiman's theorem to all of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset, we applied Breiman’s Theorem to the following features. `Op_Unique_Carrier`, `Origin`, `Dest` and for the following interacted features `Day_Of_Year`, `Origin_Dest`, `Dep_Time_Of_Week`, `Arr_Time_Of_Week`, `Holiday`. For example, if you consider the feature `Op_Unique_Carrier` it had 19 unique categories. Using Breiman's method the potential 262,143 splits were reduced to 18 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like `Origin_Dest` and `Day_Of_Year` where the number of categories were much larger.
 # MAGIC 
 # MAGIC ### Data storage on cluster - parquet
-# MAGIC The original airlines dataset has roughly 31 million records and 54 fields.  While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format in originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman..etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
+# MAGIC The original airlines dataset has roughly 31 million records and 54 features. While analyzing this data, it is crucial to be efficient with use of disk and I/O memory. Parquet files is a column oriented efficient way of storing this data and is very helpful in transporting the data before unpacking it. In our project we used this format when originally ingesting the data. In addition we made use of the convenience of parquet format, in storing the mini_train, train, validation, test data. We also benefitted from parquet-formatted storage when running EDA, where many of the EDA tasks were isolated to just a few columns at a time (thus benefit from the column-wise storage of data). We also used this format extensively during the feature engineering phase where we augmented the dataset by adding new features/columns through interactions, binning, applying Breiman, etc. Another place this format came in handy was while oversampling the imbalanced data using SMOTE. The transformed dataset was then saved in parquet to be accessed during algorithm evaluation by decision tree, random forests and ensembles.
 # MAGIC 
-# MAGIC ### Scalability & sampling (for SMOTE)
-# MAGIC Given the minority class records were around 2 million we decided to use SMOTE to create a more balanced set.  We had scalability challenges in implementing the KNN algorithm. Trying to create K nearest neighbors for 2M samples doesn’t scale well as we have to store all of these samples in memory for broadcast. To address this challenge we used only a small sample of the minority class which fit the memory well.  The second approach was to create 1000 clusters of minority samples using the K-Means algorithm and run the KNN algorithm in parallel to generate synthetic data.  The second approach is much more scalable (2.5 hrs Vs 24+hrs) and took much less time. It also yielded a synthetic sample closer to the distribution of the original data.
-# MAGIC   - Distributing the problem to multiple workers via ensembles?? (idk if this is a course concept, but easily parallelized)
+# MAGIC ### Scalability for Data Sampling & Ensemble Training
+# MAGIC Given the high-degree of imbalance in the dataset, we decided to use SMOTE to create a more balanced set. We had scalability challenges in implementing the KNN algorithm required of the original SMOTE algorithm. Namely, trying to create K nearest neighbors for approximately 2 million samples from the minority class didn’t scale well. This was due to the fact that we would need to store all of these samples in memory in order to find the K nearest neighbors for each sample. To address this challenge we used only a small random sample of the minority class which fit in memory well. The second approach was to create 1000 clusters of minority samples using the K-Means algorithm and run the KNN algorithm in parallel on these smaller clusters to generate synthetic data.  The second approach was much more scalable compared to the first (2.5 hrs Vs 24+hrs) and took much less time. It also yielded a set of synthetic samples closer to the distribution of the original minority dataset.
+# MAGIC 
+# MAGIC We also saw scalability concerns with training our ensembles, given that each of the random forests could be trained in parallel. In order to solve this "embarrassingly parallel" problem, we looked to using threadpools to run the training in parallel, which worked at first, but started to give broadcast timeout errors as the clusters became busier.
 # MAGIC 
 # MAGIC ### Broadcasting (for SMOTE, Breiman's Theorem, Holiday feature)
-# MAGIC   Broadcast variables allow the programmer to keep a read-only variable cached on each machine rather than shipping a copy of it with tasks. In this project we needed to join tables in multiple cases. By using the Broadcast variable, we implemented a map-side join, which is much faster than reduce side join, as there is no shuffle-which is more expensive.  “Brodcast +  sidejoin” were used to implement the addition of holiday feature, Aggregated Origin-Activity, Breiman ranks and to create a balanced airline dataset using SMOTE .
-# MAGIC 
-# MAGIC   
-# MAGIC ### Assumptions (for different algorithms - for example OLS vs Trees) (Remove?)
-# MAGIC   During algorithm exploration we selected a set of variety of algorithms to pick the most suitable one for this particular airline dataset. The algorithms like logistic regression and Naive Bayes tend me very simple in its modeling. These simple models relatively insensitive to variance to different training datasets. But they tend to be highly biased. This problem seem to compound when the data is imbalanced. Algorithms like decision trees and support vector machines are much more complex and as we increase complexity they tend to less and less biased but has a tendency to show a lot of variance between training sets. In other words they seem to overfit to the given training set. In our case we chose the complex model which overfits and used additional methods like random forest, ensembles and hyper paramter tuning to reduce the overfitting of the model.
+# MAGIC Broadcasted variables allow the programmer to specify to the Spark execution engine that the data stored in a given broadcasted variable is small enough for a pure copy to be shipped to each worker that needs to reference it. This is especially useful in situations where we need to join a larger dataset (like the *Airline Delays* dataset) with a small one (like the Holidays dataset). In this case, if we specify the smaller dataset in a broadcast variable prior to joining, we can trigger a broadcast join, which will allow copies of the dataset to be shipped to each worker that proccesses a subset of the larger dataset and do the join on the workers, rather than having to shuffle partitions of the large and small datasets to be joined down-stream. This was particularly useful when generating the `Holiday` feature, `Origin_Activity` feature, and when joining our Breiman ranks back to the original dataset when applying Breiman's Theorem. 
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## VIII. References
 # MAGIC * *Airline Delays* Dataset
+# MAGIC   - https://www.transtats.bts.gov/HomeDrillChart.asp
+# MAGIC   - Prepared by Luis Villarreal
 # MAGIC * References on the Bureau of Transportation Statistics
 # MAGIC   - https://www.bts.gov/topics/airlines-and-airports/understanding-reporting-causes-flight-delays-and-cancellations
 # MAGIC   - https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=236
-# MAGIC * Holidays Dataset (Wikipedia?)
-# MAGIC * Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357
-# MAGIC   - https://arxiv.org/pdf/1106.1813.pdf
-# MAGIC * SMOTE tutorial 
+# MAGIC * Holidays Dataset
+# MAGIC   - https://gist.github.com/shivaas/4758439
+# MAGIC * SMOTE Algorithm
+# MAGIC   - Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357: https://arxiv.org/pdf/1106.1813.pdf
 # MAGIC   - https://www.youtube.com/watch?v=FheTDyCwRdE
-# MAGIC * Majority Class Splitting paper(s)
-# MAGIC * Stacking paper(s)
-# MAGIC * W261 :)
-# MAGIC * "Flight delays are costing airlines serious money", by The Associated Press, DEC 10, 2014. 
-# MAGIC    - https://mashable.com/2014/12/10/cost-of-delayed-flights/
+# MAGIC * Majority Class Splitting & Stacking Algorithm
+# MAGIC   - https://en.wikipedia.org/wiki/Ensemble_learning
+# MAGIC   - https://www.mdpi.com/2076-3417/8/5/815/pdf
+# MAGIC   - http://marmota.dlsi.uji.es/WebBIB/papers/2003/paa-2.pdf 
+# MAGIC * Feature Importance for Random Forests
+# MAGIC   - https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/classification/RandomForestClassifier.scala
+# MAGIC * General Airline Study
+# MAGIC  - "Flight delays are costing airlines serious money", by The Associated Press, DEC 10, 2014.: https://mashable.com/2014/12/10/cost-of-delayed-flights/
+
+# COMMAND ----------
+
