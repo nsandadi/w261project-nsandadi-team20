@@ -12,6 +12,8 @@
 # MAGIC 
 # MAGIC As we've all probably experienced at some point in our lives, air travel is never easy. Whether you're the person getting on a flight traveling around the world, the folks in the air traffic control towers orchestrating incoming and outgoing flights, or the airports and airlines trying their best to effectively coordinate flights at every hour of every day of every year, so much can go wrong. The delays alone are enough to completely derail anyone's plans and trigger a cascading effect of consequences down the line as delays continue to stack up on top of each other over the course of time. And the biggest problem is that these delays often occur when we least expect them and at the worst possible times.
 # MAGIC 
+# MAGIC Delays are costly for airlines and their passengers. A 2010 study commissioned by the Federal Aviation Administration estimated that flight delays cost the airline industry $8 billion a year, much of it due to increased spending on crews, fuel and maintenance. They cost passengers even more, nearly $17 billion.
+# MAGIC 
 # MAGIC To attempt to solve this problem, we introduce the *Airline Delays* dataset, a dataset of US domestic flights from 2015 to 2019 collected by the Bureau of Transportation Statistics for the purpose of studying airline delays. For this analysis, we will primarily use this dataset to study the nature of airline delays in the United States over the last few years, with the ultimate goal of developing models for predicting significant flight departure delays (30 minutes or more) in the United States. 
 # MAGIC 
 # MAGIC In developing such models, we seek to answer the core question, **"Given known information prior to a flight's departure, can we predict departure delays and identify the likely causes of such delays?"**. In the last few years, about 11% of all US domestic flights resulted in significant delays, and answering these questions can truly help us to understand why such delays happen. In doing so, not only can airlines and airports start to identify likely causes and find ways to mitigate them and save both time and money, but air travelers also have the potential to better prepare for likely delays and possibly even plan for different flights in order to reduce their chance of significant delay. 
@@ -21,6 +23,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,Import Pyspark ML Dependencies (Hide)
+# Pyspark SQL libraries
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col
 from pyspark.sql.functions import when
@@ -28,6 +31,7 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 from pyspark.sql.functions import udf
 from pyspark.sql import Window
 
+# Pyspark ML libraries
 import pyspark.ml.pipeline as pl
 from pyspark.ml import Pipeline
 from pyspark.ml.classification import LogisticRegression
@@ -42,9 +46,12 @@ from pyspark.ml.classification import RandomForestClassifier
 
 from pyspark.mllib.evaluation import MulticlassMetrics
 
+# Other python librarires
 from dateutil.relativedelta import relativedelta, SU, MO, TU, WE, TH, FR, SA
 import pandas as pd
 import datetime as dt
+import ast
+import random
 
 # COMMAND ----------
 
@@ -67,7 +74,7 @@ from plotly.subplots import make_subplots
 # MAGIC ### Dataset Introduction
 # MAGIC The Bureau of Transporation Statistics provides us with a wide variety of features relating to each flight in the *Airline Delays* dataset. These features range from features about the scheduled flight such as the planned departure, arrival, and elapsed times, the planned distance, the carrier and airport information, information regarding the causes of certain delays for the entire flight, as well as the amounts of delay (for both flight departure and arrival), among many other features. 
 # MAGIC 
-# MAGIC Given that for this analysis, we will be concentrating on predicting and identify the likely causes of departure delays before any such delay happens, we will primarily concentrate our EDA, feature engineering, and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
+# MAGIC Given that for this analysis, we will be concentrating on predicting and identifying the likely causes of departure delays before any such delay happens, we will primarily concentrate on our EDA, feature engineering, and model development using features of flights that would be known at inference time. We will choose the inference time to be 6 hours prior to the scheduled departure time of a flight. Realistically speaking, providing someone with a notice that a flight will likely be delayed 6 hours in advance is likely a sufficient amount of time to let people prepare for such a delay to reduce the cost of the departure delay, if it occurs. Such features that fit this criterion include those that are related to:
 # MAGIC 
 # MAGIC * **Time of year / Flight Date** 
 # MAGIC     - `Year`: The year in which the flight occurs (range: [2015, 2019])
@@ -1156,15 +1163,97 @@ for algorithm in algorithms:
 
 # MAGIC %md
 # MAGIC ## V. Algorithm Implementation
-# MAGIC - Toy example likely with a decision tree on a mini_mini_train dataset (like 10 rows)
-# MAGIC - Walk through training the model and doing inference
-# MAGIC - Show baseline "dummy" model results on train/validation/test that only predicts 0 (hardcode all predictions to be 0)
-# MAGIC - Show basic decision tree and how it performs with unstacked data & discuss dataset imbalance
-# MAGIC - Show how decision tree functions by comparison if we stack/smote the data (maybe with just a single stack)
-# MAGIC - Move to ensemble of Decision Trees with stacked approach (maybe smote)
-# MAGIC - Move to ensemble of Random Forests with stacked approach (maybe smote)
-# MAGIC - Also do GBT & ensemble of GBT (find a good explanation for why)
-# MAGIC - try to parallelize training of ensembles
+# MAGIC 
+# MAGIC With Decision Trees as our chosen algorithm, we will proceed to explore the algorithm in a toy example, apply it to our feature engineered dataset, and expand on the basic algorithm to random forests and ensembles of random forests.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Toy Example: Decision Trees
+# MAGIC Given that in the previous section, we decided on Decision Trees as our algorithm of choice, we will now proceed to describe the math behind the algorithm with our toy example.
+# MAGIC 
+# MAGIC #### Dataset
+# MAGIC For the toy example, we will leverage a toy dataset for motivating the algorithm explanation, which consists of a 10 records from the original *Airline Delays* dataset and includes our outcome variable `Dep_Del30`, 2 numerical features `Day_Of_Week` and `CRS_Dep_Time`, as well as 2 categorical features `Origin` and `Op_Unique_Carrier`. These are displayed below:
+
+# COMMAND ----------
+
+# Load the toy example dataset
+toy_dataset = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_toy_dataset.parquet")
+display(toy_dataset)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Introduction to Decision Trees
+# MAGIC Decision trees predict the label (or class) by evaluating a set of rules that follow an IF-THEN-ELSE pattern in a question and answer style. The questions are the nodes, and the answers (true or false) are the branches in the tree to the child nodes, thus construct a tree-like structure of questions and answers. A decision tree model estimates the minimum number of true/false questions needed, to assess the probability of making a correct decision. 
+# MAGIC 
+# MAGIC For this analysis, we leveraged the CART algorithm (Classification and Regression Trees). The Decision Tree algorithm is a greedy algorithm that considers all features to select the best feature and the best split point for that feature at each given node in the tree. Initially, we have a root node for the tree. The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input. Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets. The subsets become input to the child nodes that are added to the tree for the next level of splitting. The goal of the algorithm is to produce the purest distribution of labels at each leaf node in the tree, using the training data.
+# MAGIC 
+# MAGIC If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset of data at the leaf node doesn't need to be split any further. On the other hand, if a node still contains mixed labels in its data subset, the decision tree algorithm chooses another question and threshold, based on which the subset is split further. The trick to building an effective tree is to decide which feature to select at each node and the best threshold for that feature. To do this, we need to quantify how well a feature and threshold can split the dataset at each step of the algorithm.
+# MAGIC 
+# MAGIC #### Entropy
+# MAGIC Entropy is a measure of disorder in the dataset. It characterizes the (im)purity of an arbitrary collection of examples. In decision trees, at each node, we split the data and try to group together samples that belong in the same class. The objective is to maximize the purity of the groups each time a new child node of the tree is created. The goal is to decrease the entropy as much as possible at each split. Entropy ranges between 0 and 1, where an entropy of 0 indicates a pure set (i.e the subset of observations contains only one label). 
+# MAGIC 
+# MAGIC #### Gini Impurity and Information Gain
+# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a split reduces the uncertainity by using a metric called the information gain. Information gain is the expected reduction in entropy caused by partitioning the examples according to a given feature and threshold. These two metrics are used to select the best feature and threshold at each split point. The best feature reduces the uncertainity the most. Given the feature and threshold, the algorithm recursively builds the tree at each of the new child nodes. This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Mathematical definition of entropy
+# MAGIC 
+# MAGIC The general formula for entropy is:
+# MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$ where \\(p_i\\) is the frequentist probability of elements in class \\(i\\).
+# MAGIC 
+# MAGIC Since our outcome variable `Dep_Del30` is binary, all the observations in our toy dataset fall into one of two classes (`0` or `1`). Suppose we have \\(N\\) observations in the dataset. Let's assume that \\(n\\) observations belong to label `1` and \\(m = N - n\\) observations belong to label `0`. \\(p\\) and \\(q\\), the ratios of elements of each label in the dataset are given by:
+# MAGIC 
+# MAGIC $$p = \frac{n}{N}$$ $$q = \frac{m}{N} = 1-p $$
+# MAGIC 
+# MAGIC Thus, entropy is given by the following equation:
+# MAGIC $$E = -p {\log_2 (p)} -q {\log_2 (q)}$$
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Entropy at Level 0
+# MAGIC 
+# MAGIC In our toy dataset, we have ten observations. Four of them have label `1` and six of them have label `0`. Thus, entropy at the root node is given by:
+# MAGIC 
+# MAGIC $$ Entropy = -\frac{4}{10} {\log_2 (\frac{4}{10})} -\frac{6}{10} {\log_2 (\frac{6}{10})} = 0.966 $$
+# MAGIC 
+# MAGIC In this case, our entropy is close to 1, as we have a distribution close to 50/50 for the observations belonging to each class. Given the entropy at the root node, we can use this information to grow the next level in the tree.
+
+# COMMAND ----------
+
+# MAGIC %md <img src="https://github.com/nsandadi/Images/blob/master/Decision_Tree_toy_example.jpg?raw=true" width=70%>
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Entropy at Level 1
+# MAGIC The data subset that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on a particular feature. We calculate the weighted entropy of the split by adding the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
+# MAGIC 
+# MAGIC #### Weighted entropy calculations
+# MAGIC $$ E(DayOfWeek) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (1)} = 0.94 $$
+# MAGIC $$ E(Carrier) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (0)} = 0.54 $$
+# MAGIC $$ E(Origin) = -\frac{5}{10} {\log_2 (0.72)} -\frac{5}{10} {\log_2 (0)} = 0.36 $$
+# MAGIC 
+# MAGIC #### Information Gain at Level 1
+# MAGIC Information gain gives the number of bits of information gained about the dataset by choosing a specific feature and threshold as the first branch of the decision tree, and is calculated as:
+# MAGIC $$ IG = Entropy (Parent) - Weighted Entropy (Child Nodes) $$
+# MAGIC 
+# MAGIC Based on the information gain calculations shown in the diagram above, the highest information gain is 0.606 when we use the feature `Origin` with the decision rule that the `Origin` i in the set of airports ["MCO", "MSP", "DCA", "HOU"]. Thus, among the features and split points considered in this toy example, the best feature to split on is `Origin` at level 1. This procedure can continue recursively until the appropriate stopping criteria is achieved.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Training Decision Tree on SMOTEd (Balanced) Training Dataset
+# MAGIC 
+# MAGIC For our first step towards modeling departure delays, we trained a decision tree model using all the feature engineering described in prior sections on the SMOTEd (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on CRS Departure Time and the threshold chosen is 1200 (or noon). Thus, we can infer that a departure time before or after noon along with Origin can give us information about a departure delay. 
+# MAGIC 
+# MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
+# MAGIC 
+# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 for our decision tree model. 
 
 # COMMAND ----------
 
@@ -1202,130 +1291,10 @@ briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman'
 
 # COMMAND ----------
 
-##################
-## START HERE!! ##
-##################
-
-# Re-read augmented data in parquet & avro formats
-def ReadDataInParquetAndAvro(dataName):
-  data_parquet = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".parquet")
-  data_avro = spark.read.format("avro").load(f"dbfs/user/team20/finalnotebook/airlines_" + dataName + ".avro")
-  return (data_parquet, data_avro)
-
-mini_train, mini_train_avro = ReadDataInParquetAndAvro('augmented_mini_train')
-train, train_avro = ReadDataInParquetAndAvro('augmented_train')
-val, val_avro = ReadDataInParquetAndAvro('augmented_val')
-test, test_avro = ReadDataInParquetAndAvro('augmented_test')
-
-# Redefine feature names in one place
-numFeatureNames = ['Year', 'Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Dep_Time', 'CRS_Arr_Time', 'CRS_Elapsed_Time', 'Distance', 'Distance_Group']
-catFeatureNames = ['Op_Unique_Carrier', 'Origin', 'Dest']
-binFeatureNames = ['CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'CRS_Elapsed_Time_bin']
-intFeatureNames = ['Day_Of_Year', 'Origin_Dest', 'Dep_Time_Of_Week', 'Arr_Time_Of_Week']
-holFeatureNames = ['Holiday']
-orgFeatureNames = ['Origin_Activity']
-briFeatureNames = ['Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
-outcomeName = 'Dep_Del30'
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Toy Example: Decision Trees
-# MAGIC Given that in the previous section, we decided on Decision Trees as our algorithm of choice, we will now proceed to describe the math behind the algorithm with our toy example.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Dataset
-# MAGIC For the toy example, we will leverage a toy dataset for motivating the algorithm explanation, which consists of a 9 records from the original *Airline Delays* dataset and includes our outcome variable `Dep_Del30`, 2 numerical features `Day_Of_Week` and `CRS_Dep_Time`, as well as 2 categorical features `Origin` and `Op_Unique_Carrier`. These are displayed below:
-
-# COMMAND ----------
-
-# Load the toy example dataset
-toy_dataset = spark.read.option("header", "true").parquet(f"dbfs/user/team20/finalnotebook/airlines_toy_dataset.parquet")
-display(toy_dataset)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Introduction to Decision Trees
-# MAGIC Decision trees predict the label (or class) by evaluating a set of rules that follow an IF-THEN-ELSE pattern. The questions are the nodes, and the answers (true or false) are the branches in the tree to the child nodes. A decision tree model estimates the minimum number of true/false questions needed, to assess the probability of making a correct decision. 
-# MAGIC 
-# MAGIC We use CART decision tree algorithm (Classification and Regression Trees). Decision Tree is a greedy algorithm that considers all features to select the best feature for the split. Initially, we have a root node for the tree. The root node receives the entire training set as input and all subsequent nodes receive a subset of rows as input. Each node asks a true/false question about one of the features using a threshold and in response, the dataset is split into two subsets. The subsets become input to the child nodes added to the tree for the next level of splitting. The goal is to produce the purest distribution of labels at each node.
-# MAGIC 
-# MAGIC If a node contains examples of only a single type of label, it has 100% purity and becomes a leaf node. The subset doesn't need to be split any further. On the other hand, if a node still contains mixed labels, the decision tree chooses another question and threshold, based on which the dataset is split further. The trick to building an effective tree is to decide which feature to select and at which node. To do this, we need to quantify how well a feature and threshold can split the dataset.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Entropy
-# MAGIC Entropy is a measure of disorder in the dataset. It characterizes the (im)purity of an arbitrary collection of examples. In decision trees, at each node, we split the data and try to group together samples that belong in the same class. The objective is to maximize the purity of the groups each time a new child node of the tree is created. The goal is to decrease the entropy as much as possible at each split. Entropy ranges between 0 and 1. Entropy of 0 indicates a pure set (i.e), group of observations containing only one label. 
-# MAGIC 
-# MAGIC ##### Gini impurity and Information gain
-# MAGIC 
-# MAGIC We quantify the amount of uncertainity at a single node by a metric called the gini impurity. We can quantify how much a split reduces the uncertainity by using a metric called the information gain. Information gain is the expected reduction in entropy caused by partitioning the examples according to a given feature. These two metrics are used to select the best feature and threshold at each split point. The best feature reduces the uncertainity the most. Given the feature and threshold, the algorithm recursively buils the tree at each of the new child nodes. This process continues until all the nodes are pure or we reach a stopping criteria (such as a minimum number of examples).
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Mathematical definition of entropy
-# MAGIC 
-# MAGIC The general formula for entropy is:
-# MAGIC $$ E = \sum_i -p_i {\log_2 p_i} $$ where \\(p_i\\) is the frequentist probability of elements in class \\(i\\).
-# MAGIC 
-# MAGIC Since our dataset has a binary classification, all the observations fall into one of two classes. Suppose we have N observations in the dataset. Let's assume that n observations belong to label 1 and m = N - n observations belong to label 0. p and q, the ratios of elements of each label in the dataset are given by:
-# MAGIC 
-# MAGIC $$p = \frac{n}{N}$$ $$q = \frac{m}{N} = 1-p $$
-# MAGIC 
-# MAGIC Entropy is given by the following equation:
-# MAGIC $$E = -p {\log_2 (p)} -q {\log_2 (q)}$$
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Entropy at Level 0
-# MAGIC 
-# MAGIC In our toy dataset, we have ten observations. Four of them have label 1 and six of them have label 0. Thus, entropy at the root node is given by:
-# MAGIC 
-# MAGIC $$ Entropy = -\frac{4}{10} {\log_2 (\frac{4}{10})} -\frac{6}{10} {\log_2 (\frac{6}{10})} = 0.966 $$
-# MAGIC 
-# MAGIC Entropy is close to 1 as we have a distribution close to 50/50 for the observations belonging to each class.
-
-# COMMAND ----------
-
-# MAGIC %md <img src="https://github.com/nsandadi/Images/blob/master/Decision_Tree_toy_example.jpg?raw=true" width=70%>
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ##### Entropy at Level 1
-# MAGIC The data set that goes down each branch of the tree has its own entropy value. We can calculate the expected entropy for each possible attribute. This is the degree to which the entropy would change if we branch on a particular feature. We calculate the weighted entropy of the split by adding the entropies of the two child nodes, weighted by the proportion of examples from the parent node that ended up at that child.
-# MAGIC 
-# MAGIC ##### Weighted entropy calculations
-# MAGIC $$ E(DayOfWeek) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (1)} = 0.94 $$
-# MAGIC $$ E(Carrier) = -\frac{6}{10} {\log_2 (0.9042)} -\frac{4}{10} {\log_2 (0)} = 0.54 $$
-# MAGIC $$ E(Origin) = -\frac{5}{10} {\log_2 (0.72)} -\frac{5}{10} {\log_2 (0)} = 0.36 $$
-# MAGIC 
-# MAGIC ##### Information Gain at Level 1
-# MAGIC Information gain gives the number of bits of information gained about the dataset by choosing a specific feature and threshold as the first branch of the decision tree, and is calculated as:
-# MAGIC $$ G = Entropy (Parent) - Weighted Entropy (Child Nodes) $$
-# MAGIC 
-# MAGIC ##### Based on the information gain from the diagram above, the highest information gain is 0.606. Thus, the best feature to split on is Origin.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Modeling Helpers
-# MAGIC * Evaluation functions
-# MAGIC * Decision Tree PrintModel Function
-
-# COMMAND ----------
-
-
+# DBTITLE 1,Helper Code for Modeling Simple Decision Trees
 # Encodes a string column of labels to a column of label indices
-# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels (could also do "error" or "skip")
+# Set HandleInvalid to "keep" so that the indexer adds new indexes when it sees new labels
 # Apply string indexer to categorical, binned, and interaction features (all string formatted), as applicable
-# Docs: https://spark.apache.org/docs/latest/ml-features#stringindexer
 def PrepStringIndexer(stringfeatureNames):
   return [StringIndexer(inputCol=f, outputCol=f+"_idx", handleInvalid="keep") for f in stringfeatureNames]
 
@@ -1334,22 +1303,12 @@ def PrepStringIndexer(stringfeatureNames):
 def PrepVectorAssembler(numericalFeatureNames, stringFeatureNames):
   return VectorAssembler(inputCols = numericalFeatureNames + [f + "_idx" for f in stringFeatureNames], outputCol = "features")
 
+# Trains a simple Decision Tree model
 def TrainDecisionTreeModel(trainingData, stages, outcomeName, maxDepth, maxBins):
-  # Train Model
   dt = DecisionTreeClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins) 
   pipeline = Pipeline(stages = stages + [dt])
   dt_model = pipeline.fit(trainingData)
   return dt_model
-
-def TrainRandomForestModel(trainingData, stages, outcomeNames, maxDepth, maxBins, numTrees):
-  # Train Model
-  rf = RandomForestClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins, numTrees=numTrees) 
-  pipeline = Pipeline(stages = stages + [rf])
-  rf_model = pipeline.fit(trainingData)
-  return rf_model
-
-import ast
-import random
 
 # Visualize the decision tree model that was trained in text form
 # Note that the featureNames need to be in the same order they were provided
@@ -1392,19 +1351,6 @@ def PrintDecisionTreeModel(model, featureNames):
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Training Decision Tree on Smoted (Balanced) Training Dataset
-# MAGIC 
-# MAGIC Decision trees are a very popular approach to prediction problems. They can be trained on both categorical and numerical features to perform classification.
-# MAGIC 
-# MAGIC We trained a decision tree model using all the feature transformations described in prior sections on the smoted (balanced) training dataset. One of the best characteristics of a decision tree is its interpretability. From the printout of the model below, we can see that the model chose CRS_Dep_Time as the most important feature to split on, followed by Origin_Activity and Origin_Dest_breiman. Distance and Carrier are considered less important features and these features are chosen further down the tree. At the root node, the decision tree splits on CRS Departure Time and the threshold chosen is 1200 (or noon). Thus, we can infer that a departure time before or after noon along with Origin can give us information about a departure delay. 
-# MAGIC 
-# MAGIC We did some hyper-parameter tuning on the decision tree model using maxDepth. This parameter represents the maximum depth the tree is allowed to grow. In general, the deeper we allow the tree to grow, the more complex the model will become because there will be more splits and it captures more information about the data. However, this is one of the root causes of overfitting in decision trees. The model will fit perfectly to the training data but will not be able to generalize well on test set. Selecting a low value for maxDepth will make the model underfit. Thus, selecting the right maxDepth is important to build a good model.
-# MAGIC 
-# MAGIC For selecting the optimal value, we tried maxDepth values of 5, 10, 15, 20, 30, 50 and 100. The Accuracy does not increase much after maxDepth = 30 and Area Under ROC (AUROC) for the validation set is highest for maxDepth = 15. Since, we can easily overfit the data using a higher maxDepth, we select maxDepth = 15 for our decision tree model. 
-
-# COMMAND ----------
-
 featureNames = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
 va_base = PrepVectorAssembler(numericalFeatureNames = featureNames, stringFeatureNames = [])
 
@@ -1436,6 +1382,17 @@ for max_depth in [5,10,15,20,30,50,100]:
 # MAGIC - Random selection of a subset of features
 # MAGIC 
 # MAGIC We plot feature importance below for the random forest model to understand which features are given most/least importance. Origin Activity and CRS Departure Time are given the most importance. From this, we can generally infer that origin along with the time of the day can give us important information about predicting a departure delay.
+
+# COMMAND ----------
+
+# DBTITLE 1,Helper Code for Modeling Simple Random Forests
+# Trains a simple Random Forest model
+def TrainRandomForestModel(trainingData, stages, outcomeNames, maxDepth, maxBins, numTrees):
+  # Train Model
+  rf = RandomForestClassifier(labelCol = outcomeName, featuresCol = "features", seed = 6, maxDepth = maxDepth, maxBins=maxBins, numTrees=numTrees) 
+  pipeline = Pipeline(stages = stages + [rf])
+  rf_model = pipeline.fit(trainingData)
+  return rf_model
 
 # COMMAND ----------
 
@@ -1539,13 +1496,12 @@ for maxDepth in [5, 10, 15]:
 # MAGIC 
 # MAGIC Data transformation step
 # MAGIC 
-# MAGIC `mini_train`, `train`, `val` and `test` is transformed using VectorAssmebler into a feature vector - label format. The feature indexer is also calculated. 
+# MAGIC `mini_train`, `train`, `val` and `test` is transformed into a feature vector - label format.
 
 # COMMAND ----------
 
 def PreprocessForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
   target       = ["Dep_Del30"]
-  #all_features = ['Month', 'Day_Of_Month', 'Day_Of_Week', 'CRS_Elapsed_Time', 'Distance',  'CRS_Dep_Time_bin', 'CRS_Arr_Time_bin', 'Origin_Activity', 'Op_Unique_Carrier_brieman', 'Origin_brieman', 'Dest_brieman', 'Day_Of_Year_brieman', 'Origin_Dest_brieman', 'Dep_Time_Of_Week_brieman', 'Arr_Time_Of_Week_brieman', 'Holiday_brieman']
   all_features = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
   
   assembler = VectorAssembler(inputCols=all_features, outputCol="features")
@@ -1555,15 +1511,9 @@ def PreprocessForEnsemble(mini_train_data, train_data, val_data, test_data, trai
                                                   ensemble_pipeline.fit(train_data).transform(train_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
                                                   ensemble_pipeline.fit(val_data).transform(val_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
                                                   ensemble_pipeline.fit(test_data).transform(test_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"),
-                                                  ensemble_pipeline.fit(train_smoted_data).transform(train_smoted_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))
-  
-  featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train
-                                                                                                          .union(tmp_val)
-                                                                                                          .union(tmp_test))
-  featureIndexer_smorted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train_smoted
-                                                                                                        .union(tmp_val)
-                                                                                                        .union(tmp_test))
-  
+                                                  ensemble_pipeline.fit(train_smoted_data).transform(train_smoted_data).select(["features"] + target).withColumnRenamed("Dep_Del30", "label"))  
+  featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train.union(tmp_val).union(tmp_test))
+  featureIndexer_smorted = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=400).fit(tmp_train_smoted.union(tmp_val).union(tmp_test))
   return all_features, featureIndexer, featureIndexer_smorted, tmp_mini_train, tmp_train, tmp_val, tmp_test, tmp_train_smoted
 
 
@@ -1631,14 +1581,15 @@ train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
 
 # COMMAND ----------
 
+# For non- smoted cases - database is partitioned.
 print([[d.groupBy('label').count().toPandas()["count"].to_list()] for d in train_group], 
  train_combiner.groupBy('label').count().toPandas()["count"].to_list())
 
 # COMMAND ----------
 
-
+# For non- smoted case
 print(ensemble_train_smoted.groupBy('label').count().toPandas()["count"].to_list())
-smoted_splits = ensemble_train_smoted.randomSplit([1.0] * 10, 1)
+smoted_splits = ensemble_train_smoted.randomSplit([1.0] * 10, 1) # Split the dataset.
 train_combiner_smoted, train_group_smoted = smoted_splits[-1], smoted_splits[0:-1]
 
 # COMMAND ----------
@@ -1670,6 +1621,7 @@ spark.conf.get('spark.sql.broadcastTimeout')
 
 # COMMAND ----------
 
+# Code for parallel training.
 def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
   job = []
   for num, _ in enumerate(en_train):
@@ -1679,8 +1631,7 @@ def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
       
   return pool.map(lambda x: x[0].fit(x[1]), zip(job, en_train))
 
-# The training is still done serially (code commented below) to avoid dabricks error.
-
+# Below is the code for parallel training. (Commented out now)
 # Parallel training is not done in databricks environment.      
 # ensemble_model = TrainEnsembleModels_parallel(train_group, ensemble_featureIndexer, 
 #                     # Type of model we can use.
@@ -1688,6 +1639,7 @@ def TrainEnsembleModels_parallel(en_train, featureIndexer, classifier) :
 #                    )
 # print("Training done")
 
+# The training is still done serially now to avoid databricks error during heavy load.
 def TrainEnsembleModels(en_train, featureIndexer, classifier) :
   model = []
   for num, train in enumerate(en_train):
@@ -1760,7 +1712,7 @@ fig.show()
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC #### Construct a new data set based on the output of base classifiers
+# MAGIC #### Construct a new dataset based on the output of base classifiers
 # MAGIC 
 # MAGIC Do inference on first level classifiers, using the remaining balanced dataset. Collect the predictions. Use these predictions as features for level two voting model.
 
@@ -1845,11 +1797,6 @@ ensemble_featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedF
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC Discussion for Logistic Regression Voting Model: Want to use L2 regularization, not L1 for the voting model. If we use L1, this will effectively zero-out some of the coefficients for some of the models in the ensemble, which will be same as removing entire subsets of the data, which is not something we want--in this case, it is better to use L2.
-
-# COMMAND ----------
-
 # Logistic Regression
 model_trained_ensemble_lr = TrainCombiner(ensemble_transformed, ensemble_featureIndexer, 
               LogisticRegression(featuresCol="indexedFeatures", maxIter=10, regParam=0.2))
@@ -1900,7 +1847,7 @@ def FinalEnsmblePipeline(model_comb, model_group, data) :
 # COMMAND ----------
 
 # MAGIC %md 
-# MAGIC #### Model weights of ensembles
+# MAGIC #### Plot Model weights of ensembles
 # MAGIC 
 # MAGIC Below shows, Logistic regression and SV gives equal importance to all level one modes as opposed to Random forest.
 
@@ -2160,7 +2107,6 @@ for i in range(0,9) :
 # COMMAND ----------
 
 # Reload test and validation data from checkpoints
-
 print("Loading ensemble_test.v1.parquet")
 ensemble_test_load = spark.read.option("header", "true").parquet("dbfs:/user/team20/finalnotebook/ensemble_test.v1.parquet")
 print("Loading ensemble_val.v1.parquet")
@@ -2223,7 +2169,7 @@ fig.show()
 
 # COMMAND ----------
 
-# Run the evaluation metrics after prediction. Use the model trained with smote-d data for  prediction
+# Run the evaluation metrics after prediction. Use the model trained with non smote-d data for  prediction
 
 model_eval_regular = []
 for (l2_name, l2_model, l1_model)  in [
@@ -2280,12 +2226,17 @@ fig.show()
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC Compare feature importance between Majority class splitted Vs Smoted, side by side. The feature vector of each ensemble is averaged and normalized for smoted and non-smoted cases to generate below plots.
+
+# COMMAND ----------
+
 import numpy as np
 
 fig = make_subplots(rows=rows, cols=columns, subplot_titles=("Majority class splitted","Smoted"))
 
 def normalize_vec(x) :
-    vec = np.stack(x).sum(axis=0) 
+    vec = np.stack(x).sum(axis=0)  # Normalization step.
     return(vec/np.linalg.norm(vec))
 
 for (row, col), value in [((1, 1), [m.stages[-1].featureImportances.toArray() for m in ensemble_model_load]), 
@@ -2319,7 +2270,7 @@ fig.show()
 # MAGIC %md
 # MAGIC ## VII. Applications of Course Concepts
 # MAGIC ### Bias-variance tradeoff (in dataset balancing discussion)        
-# MAGIC Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. The hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. (Did we do this or was it future?)
+# MAGIC Bias variance tradeoff came up throughout the project at different places. During EDA we broadly classified algorithms as those that underfit with high bias and low variance and those that tend to over-fit with low bias and high variance. The logistic regression and Naive Bayes belonged to the former category while decision tree and support vector machines belonged to the latter.  The classifiers themselves look for the lowest MSE (mean squared error) when training the model where this concept is applied again. Lastly, during algorithm performance evaluation of decision trees it became clear that this algorithm due to the higher complexity and low bias tended to overfit to the given training set.  Because of that there was high variance between training and validation sets. (???) To reduce the over-fitting and high variance we used random forests and ensembles of random forests. Some limited hyperparameter tuning using random forests helped us to get to the optimal solution balancing both bias and variance. Due to resource limitations we couldn't run GridsearchCV.
 # MAGIC        
 # MAGIC ### Breiman's Theorem (for ordering categorical variables)           
 # MAGIC We applied Breiman's theorem to some of the unordered categorical features to generate a ranking within each categorical feature. We accomplished this by ordering each category based on the ranking obtained from the calculation of the average outcome. This method helped us convert categorical features to ranked numerical features. In our dataset we applied Breiman’s ranking to the following features. `Op_Unique_Carrier`, `Origin`, `Dest` and for the following interacted features `Day_Of_Year`, `Origin_Dest`, `Dep_Time_Of_Week`, `Arr_Time_Of_Week`, `Holiday`. For example, if you consider the feature `Op_Unique_Carrier` it had 19 unique categories. Using Breiman's method the potential 524288 splits were reduced to 18 splits by ranking them based on the average outcome value. The scalability benefits were even more pronounced for features like `Origin_Dest` and `Day_Of_Year` where the number of categories were much larger.
@@ -2344,9 +2295,15 @@ fig.show()
 # MAGIC ## VIII. References
 # MAGIC * *Airline Delays* Dataset
 # MAGIC * References on the Bureau of Transportation Statistics
+# MAGIC   - https://www.bts.gov/topics/airlines-and-airports/understanding-reporting-causes-flight-delays-and-cancellations
+# MAGIC   - https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=236
 # MAGIC * Holidays Dataset (Wikipedia?)
-# MAGIC * SMOTE paper(s)
-# MAGIC * SMOTE video
+# MAGIC * Chawla, Nitesh V., et al. “SMOTE: synthetic minority over-sampling technique.” Journal of artificial intelligence research16 (2002): 321–357
+# MAGIC   - https://arxiv.org/pdf/1106.1813.pdf
+# MAGIC * SMOTE tutorial 
+# MAGIC   - https://www.youtube.com/watch?v=FheTDyCwRdE
 # MAGIC * Majority Class Splitting paper(s)
 # MAGIC * Stacking paper(s)
 # MAGIC * W261 :)
+# MAGIC * "Flight delays are costing airlines serious money", by The Associated Press, DEC 10, 2014. 
+# MAGIC    - https://mashable.com/2014/12/10/cost-of-delayed-flights/
