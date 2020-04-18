@@ -1474,7 +1474,7 @@ for maxDepth in [5, 10, 15]:
 # MAGIC 
 # MAGIC As we discussed previously, the majority class splitting approach involves simply the majority class into \\(N\\) parts and constructing \\(N\\) subsets of the majority class and combining them with the entire subset of the minority class, such that each data subset is balanced, contains the full minority class, and has a \\(\frac{1}{N}\\)th random sample of the majority class. Each of these datasets will be used to train a single model in the first stage of the ensemble. By taking this approach, we can still ensure the training data used for each model is balanced and in the process, we will not lose any information that might have been lost from simply undersampling the majority class, nor will the stage 1 models overfit to the minority class (which would have happened had we oversampled the minority class). 
 # MAGIC 
-# MAGIC In the diagram below, we depict how the distribution of the datasets are shared amongst the individual random forest models used in the first stage of the ensemble stacking approach. Note that in the example, we have three stage 1 models, yet the majority class is split into four parts. This fourth majority split will be reserved for the second stage of the ensemble.
+# MAGIC In the diagram below, we depict how the distribution of the datasets are shared amongst the individual random forest models used in the first stage of the ensemble stacking approach. With this approach, each model learns from the dataset independently of each other. The training of these models can be parallized in spark using the python thread pool utility. Note that in the example, we have three stage 1 models, yet the majority class is split into four parts. This fourth majority split will be reserved for the second stage of the ensemble.
 
 # COMMAND ----------
 
@@ -1483,7 +1483,7 @@ for maxDepth in [5, 10, 15]:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC In stacking, the algorithm takes the outputs of the sub-models and learns how to combine the input predictions to  make a better final prediction. The stacking procedure consists of two levels of models. The first level generates predictions and the second level combines these predictions to generate the final prediction. As a result, the models need to be trained in two stages. In stage1 the training data is chopped into a Minority and several Majority pieces. All the stage 1 models are trained on these datasets. Given a subset of majority class, each model learns from the dataset independently of each other.  The training of these models can be parallized in spark using the python thread pool utility. The remaining 4-th pair in the above example can be used for training Stage 2 models.
+# MAGIC In stacking, the algorithm takes the outputs of the sub-models and learns how to combine the input predictions to  make a better final prediction. The stacking procedure consists of two levels of models. The first level generates predictions and the second level combines these predictions to generate the final prediction. As a result, the models need to be trained in two stages. The first one is shown above, where we train each individual model in parallel. The second stage is shown below, where we train a voting model that aggregates the predictions of the individual models. The last subset of data is then used for training the Stage 2 voting model, as shown below:
 
 # COMMAND ----------
 
@@ -1506,14 +1506,8 @@ for maxDepth in [5, 10, 15]:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC Data transformation step
-# MAGIC 
-# MAGIC `mini_train`, `train`, `val` and `test` is transformed into a feature vector - label format.
-
-# COMMAND ----------
-
+# DBTITLE 1,Data Preparation for Ensemble Training
+# Prepare features for ensemble
 def PreprocessForEnsemble(mini_train_data, train_data, val_data, test_data, train_smoted_data) :
   target       = ["Dep_Del30"]
   all_features = numFeatureNames + binFeatureNames + orgFeatureNames + briFeatureNames
@@ -1548,7 +1542,7 @@ if False :
 # MAGIC %md
 # MAGIC #### Balance the dataset, partition for further training
 # MAGIC 
-# MAGIC Balanced dataset is generated. We will generate a set of 10 datasets. 9 of them will be used for training the level one classifiers. The last one will be used to train the level two classfier. 
+# MAGIC For the purpose of training the ensemble with the majority class splitted approach, we will generate a set of 10 datasets. 9 of them will be used for training the level one random forest classifiers. The last subset will be used to train the level two classfier. This is done below:
 
 # COMMAND ----------
 
@@ -1587,11 +1581,6 @@ def PrepareDatasetForStacking(train, outcomeName, majClass = 0, minClass = 1):
 
 # Input the training set prep-ed for ensemble approach.
 train_combiner, train_group = PrepareDatasetForStacking(ensemble_train, 'label')
-
-# COMMAND ----------
-
-# MAGIC %md 
-# MAGIC Below we see that we have a set of 10 balanced datasets. We will use this for our further training. Below, we also examine the smoted data and check the balancing as well.
 
 # COMMAND ----------
 
@@ -1727,7 +1716,7 @@ fig.show()
 # MAGIC %md 
 # MAGIC #### Construct a new dataset based on the output of base classifiers
 # MAGIC 
-# MAGIC Do inference on first level classifiers, using the remaining balanced dataset. Collect the predictions. Use these predictions as features for level two voting model.
+# MAGIC Using the random forest classifiers training in the first stage, we'll use the remaining balanced dataset subset to collection predictions from these random forest classifiers and use these predictions to train the voting models. The code below outlines how we'd aggregate these predictions for ingestion to the voting model for training the voting model.
 
 # COMMAND ----------
 
@@ -1794,7 +1783,7 @@ reduced_df.show(2)
 # MAGIC %md
 # MAGIC #### Stage 2 : Learn a second-level classifier based on training set from first-level.
 # MAGIC 
-# MAGIC Train the second level classifier. Use Logistic regression, Support vector machines and random forest for training.
+# MAGIC For the second stage, we'll train the second level classifier, which will be our voting model. Among our candidate voting models, we will consider Logistic Regression, Support Vector Machines, and Random Forests, to have a diverse set of candidates for our voting models. This is done below:
 
 # COMMAND ----------
 
@@ -1839,10 +1828,10 @@ if False :
 # MAGIC %md
 # MAGIC #### Create final ensemble pipeline
 # MAGIC 
-# MAGIC Stitch together the final pipeline. The pipelne accepts below arguments :
-# MAGIC * The level one model
+# MAGIC For the final pipeline, we'll stitch together the following pieces:
+# MAGIC * The level one models, which are combined into a single parameter
 # MAGIC * Level two voting model
-# MAGIC * data for running inference.
+# MAGIC * Data for running inference (e.g. validation set)
 
 # COMMAND ----------
 
@@ -2345,6 +2334,3 @@ fig.show()
 # MAGIC   - https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/classification/RandomForestClassifier.scala
 # MAGIC * General Airline Study
 # MAGIC  - "Flight delays are costing airlines serious money", by The Associated Press, DEC 10, 2014.: https://mashable.com/2014/12/10/cost-of-delayed-flights/
-
-# COMMAND ----------
-
